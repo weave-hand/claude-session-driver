@@ -4,11 +4,11 @@ Turn one Claude Code session into a project manager that delegates tasks to othe
 
 ## Why
 
-A single Claude session works on one task at a time. With this plugin, a controller session launches worker sessions in tmux, assigns each a task, monitors their progress, reviews their tool calls, and collects results. Workers run in parallel. The controller decides what to do with their output.
+A single Claude session works on one task at a time. With this plugin, a controller session launches worker sessions in tmux, assigns each a task, monitors their progress, and collects results. Workers run in parallel. The controller decides what to do with their output.
 
 ## How It Works
 
-Each worker session loads hooks that write lifecycle events to a JSONL file: session start, prompt submitted, tool use, stop, and session end. A PreToolUse hook pauses before every tool call, giving the controller a window to approve or deny it. If the controller does not respond within the timeout, the tool call proceeds.
+Workers run with `--dangerously-skip-permissions` and execute tool calls without prompting. The plugin's hooks write lifecycle events to a JSONL file — session start, prompt submitted, each tool call (with name and input), stop, and session end — so a controller can watch what each worker is doing. The events are observation-only; the plugin does not gate tool calls.
 
 The controller orchestrates workers through shell scripts that manage tmux sessions, poll events, read conversation logs, and clean up.
 
@@ -47,7 +47,6 @@ Install the plugin and ask Claude to manage a project. The `driving-claude-code-
 | `read-events.sh` | Read and filter the event stream |
 | `read-turn.sh` | Format the last turn as markdown |
 | `stop-worker.sh` | Stop a worker and clean up |
-| `approve-tool.sh` | Approve or deny a pending tool call |
 
 ## License
 

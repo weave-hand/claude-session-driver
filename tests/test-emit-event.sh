@@ -251,6 +251,61 @@ check_mapping "Stop"             "stop"
 check_mapping "UserPromptSubmit" "user_prompt_submit"
 check_mapping "SessionEnd"       "session_end"
 
+# --- Test: PreToolUse records tool name and input ---
+echo "Test: PreToolUse records tool name and input"
+setup
+SESSION_ID="test-session-pretool"
+make_worker "$SESSION_ID"
+EVENT_FILE="$EVENT_DIR/${SESSION_ID}.events.jsonl"
+
+echo '{"session_id":"test-session-pretool","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"echo hi"}}' \
+  | bash "$EMIT_EVENT" > /dev/null
+
+if [ ! -f "$EVENT_FILE" ]; then
+  fail "PreToolUse file exists" "event file was not created"
+else
+  LINE=$(head -1 "$EVENT_FILE")
+  EVENT_VAL=$(echo "$LINE" | jq -r '.event')
+  TOOL_VAL=$(echo "$LINE" | jq -r '.tool')
+  CMD_VAL=$(echo "$LINE" | jq -r '.tool_input.command')
+
+  if [ "$EVENT_VAL" = "pre_tool_use" ]; then
+    pass "PreToolUse maps to pre_tool_use"
+  else
+    fail "PreToolUse event" "expected 'pre_tool_use', got '$EVENT_VAL'"
+  fi
+
+  if [ "$TOOL_VAL" = "Bash" ]; then
+    pass "PreToolUse records tool name"
+  else
+    fail "PreToolUse tool name" "expected 'Bash', got '$TOOL_VAL'"
+  fi
+
+  if [ "$CMD_VAL" = "echo hi" ]; then
+    pass "PreToolUse records tool input"
+  else
+    fail "PreToolUse tool input" "expected 'echo hi', got '$CMD_VAL'"
+  fi
+fi
+
+# --- Test: PreToolUse does NOT emit a permissionDecision (observation-only) ---
+# Under --dangerously-skip-permissions, hook-returned permissionDecision is
+# ignored anyway, but we still want the hook to keep its mouth shut so future
+# readers don't think it's gating anything.
+echo "Test: PreToolUse emits no stdout decision (observation-only)"
+setup
+SESSION_ID="test-session-pretool-silent"
+make_worker "$SESSION_ID"
+
+STDOUT=$(echo '{"session_id":"test-session-pretool-silent","hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":"/tmp/x"}}' \
+  | bash "$EMIT_EVENT")
+
+if [ -z "$STDOUT" ]; then
+  pass "PreToolUse emits no stdout (no permission decision)"
+else
+  fail "PreToolUse stdout" "expected empty stdout, got '$STDOUT'"
+fi
+
 # --- Test: Hook handles JSON without trailing newline (regression for #9 fix) ---
 echo "Test: Hook accepts JSON payload without trailing newline"
 setup

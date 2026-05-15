@@ -1,5 +1,40 @@
 # Changelog
 
+## [2.0.0] - 2026-05-15
+
+### Changed
+- **Dropped the controller-side tool-call approval gate.** Workers run with
+  `--dangerously-skip-permissions` and execute tool calls without prompting;
+  the plugin no longer pretends otherwise. Empirical testing confirmed that
+  Claude Code ignores hook-returned `permissionDecision` values under that
+  flag, so the previous `pre_tool_use` → poll-for-`tool-decision` →
+  allow/deny dance was cosmetic. Removing the fake gate makes the threat
+  model honest: a worker does whatever its prompt tells it to do, and the
+  controller's job is to choose its prompts carefully and watch the event
+  stream.
+- The `PreToolUse` hook is now observation-only. It still emits a
+  `pre_tool_use` event (with `tool` and `tool_input` fields) to the event
+  stream so a controller can monitor what each worker is doing. The
+  `approve-tool` hook is gone — `emit-event` handles every lifecycle hook.
+- `scripts/grant-consent.sh` rewrites the consent screen to be accurate
+  about what the plugin actually does: workers run in bypass mode, the
+  hook is for observation, and there is no per-call gating. Existing
+  consent files remain valid since the underlying threat model
+  (`--dangerously-skip-permissions`) hasn't changed.
+- `scripts/status.sh` no longer returns `awaiting-approval`; the four
+  remaining states are `idle | working | terminated | gone` (plus
+  `unknown` when the events file hasn't been created yet).
+
+### Removed
+- `scripts/approve-tool.sh` — controller-side decision writer is no
+  longer meaningful. **Breaking for anyone scripting against it.**
+- `hooks/approve-tool` — replaced by `hooks/emit-event` handling
+  `PreToolUse`.
+- `CLAUDE_SESSION_DRIVER_APPROVAL_TIMEOUT` env var — there's no decision
+  to wait for, so the timeout has no purpose.
+- `/tmp/claude-workers/<id>.tool-pending` and `.tool-decision` files no
+  longer exist.
+
 ## [1.2.0] - 2026-05-13
 
 ### Changed

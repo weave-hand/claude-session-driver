@@ -13,7 +13,7 @@ REM `setlocal enabledelayedexpansion` is required so `!ERRORLEVEL!` captures
 REM the actual bash exit code rather than the value `%ERRORLEVEL%` had when
 REM the parenthesized `if` block was first parsed (which is always 0 on the
 REM first call). Without it, hook failures look like successes to Claude
-REM Code, which silently breaks PreToolUse approval gating.
+REM Code, which would silently swallow Stop-hook errors and confuse shutdown.
 REM
 REM Usage: run-hook.cmd <script-name> [args...]
 
@@ -31,7 +31,7 @@ if exist "C:\Program Files (x86)\Git\bin\bash.exe" (
 REM No Git-for-Windows bash. The plugin can't operate without it; exit 0 so
 REM lifecycle hooks (Stop/SessionEnd) don't block session shutdown (#15). The
 REM worker can't run on Windows anyway (tmux dep), and a controller without
-REM bash has no .meta file so approve-tool would exit 0 silently for it.
+REM bash has no .meta file so emit-event would exit 0 silently for it.
 exit /b 0
 CMDBLOCK
 

@@ -3,10 +3,15 @@ set -euo pipefail
 
 # Interactive one-time consent flow for claude-session-driver.
 #
-# Launching workers requires running them with --dangerously-skip-permissions.
-# The plugin's PreToolUse hook intercepts each tool call for controller-based
-# approval, but the worker still starts in bypass mode and the user should
-# affirmatively accept that once. After acceptance, a dotfile is written to
+# Workers run with --dangerously-skip-permissions. There is no per-call
+# approval gate — Claude Code bypasses its permission system entirely under
+# that flag, so the worker executes tool calls without prompting. The plugin
+# emits lifecycle events to a JSONL file (including pre_tool_use, so you can
+# watch what the worker is doing) but does not block tool calls on a
+# controller decision.
+#
+# Because of that, the user should affirmatively accept the bypass mode once
+# before any worker is launched. After acceptance, a dotfile is written to
 # ~/.claude/.claude-session-driver-consent and launch-worker.sh stops asking.
 #
 # This script must be run interactively (from a real terminal). The intended
@@ -46,18 +51,22 @@ claude-session-driver — one-time consent
 
 This plugin spawns Claude Code workers with --dangerously-skip-permissions.
 
-Workers will not display the normal permission dialog before each tool call.
-Instead, the plugin's PreToolUse hook routes every tool call back to the
-controller (the Claude session that launched the worker) for approval, so the
-safety check is still present — just delegated to the controller rather than
-shown as an interactive dialog inside the worker.
+Workers will not display the normal permission dialog before each tool call,
+and the plugin does not gate tool calls either. The PreToolUse hook records
+a pre_tool_use event to the worker's event stream so a controller can watch
+what's happening, but the tool runs regardless of what any controller does.
 
-The controller approves or denies each tool call before the worker runs it.
-That approval can come from another Claude session (for project-manager-style
-delegation), an automation script, or you typing into a controller terminal.
+In practice this means a worker will execute whatever tool calls the model
+decides to make in response to the prompts you send it. You are responsible
+for the prompts you give workers and for the actions those workers take.
 
-By proceeding, you accept responsibility for actions the controller approves
-on the worker's behalf. This consent is recorded in
+To monitor a running worker, tail its event file:
+
+    tail -f /tmp/claude-workers/<session_id>.events.jsonl
+
+To stop a worker, use scripts/stop-worker.sh.
+
+This consent is recorded in
 
     $CONSENT_FILE
 

@@ -31,9 +31,9 @@ if [ ! -f "$CONSENT_FILE" ]; then
   cat >&2 <<EOF
 Error: claude-session-driver requires one-time consent before launching workers.
 
-This plugin runs workers with --dangerously-skip-permissions and routes
-tool-call approval through its PreToolUse hook. You need to acknowledge
-that once. Open a terminal and run:
+Workers run with --dangerously-skip-permissions and execute tool calls
+without prompting. You need to acknowledge that once. Open a terminal and
+run:
 
     bash $SCRIPT_DIR/grant-consent.sh
 
@@ -64,9 +64,6 @@ if tmux has-session -t "$TMUX_NAME" 2>/dev/null; then
   exit 1
 fi
 
-# Propagate approval timeout through tmux to the hook environment
-APPROVAL_TIMEOUT="${CLAUDE_SESSION_DRIVER_APPROVAL_TIMEOUT:-30}"
-
 # When the controller is itself a claude session (or a Claude Desktop
 # Terminal), two env vars can leak into the worker and break it:
 #   CLAUDE_CODE_SSE_PORT                 - points the worker at the parent's
@@ -86,7 +83,6 @@ APPROVAL_TIMEOUT="${CLAUDE_SESSION_DRIVER_APPROVAL_TIMEOUT:-30}"
 # silencing the bypass-permissions warning. Paired with
 # --dangerously-skip-permissions, which the user already consented to.
 tmux new-session -d -s "$TMUX_NAME" -c "$WORKING_DIR" \
-  -e "CLAUDE_SESSION_DRIVER_APPROVAL_TIMEOUT=$APPROVAL_TIMEOUT" \
   -e "CLAUDE_CODE_SSE_PORT=" \
   -e "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=" \
   claude --session-id "$SESSION_ID" --plugin-dir "$PLUGIN_DIR" \

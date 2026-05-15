@@ -6,6 +6,10 @@ set -euo pipefail
 # to /tmp/claude-workers/<session_id>.events.jsonl.
 #
 # Only activates for worker sessions launched by the session driver.
+#
+# This hook is observation-only. Under --dangerously-skip-permissions a
+# worker's tool calls run without gating; the PreToolUse hook here just
+# records that a tool is about to run so a controller can watch.
 
 # Read all of stdin with a bounded 5s timeout. Without the timeout, if the
 # caller fails to close stdin, the read would hang forever, leaking bash
@@ -40,6 +44,7 @@ case "$HOOK_EVENT" in
   Stop)             EVENT="stop" ;;
   UserPromptSubmit) EVENT="user_prompt_submit" ;;
   SessionEnd)       EVENT="session_end" ;;
+  PreToolUse)       EVENT="pre_tool_use" ;;
   *)                EVENT=$(echo "$HOOK_EVENT" | sed 's/\([A-Z]\)/_\L\1/g' | sed 's/^_//') ;;
 esac
 
@@ -47,10 +52,18 @@ mkdir -p /tmp/claude-workers
 
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-# SessionStart includes cwd; other events do not
+# Build the event JSON. SessionStart includes cwd. PreToolUse includes the
+# tool name and input so controllers watching the event stream can see what
+# the worker is about to do. Other events just carry ts + event.
 if [ "$EVENT" = "session_start" ] && [ -n "$CWD" ]; then
   EVENT_JSON=$(jq -cn --arg ts "$TIMESTAMP" --arg event "$EVENT" --arg cwd "$CWD" \
     '{ts: $ts, event: $event, cwd: $cwd}')
+elif [ "$EVENT" = "pre_tool_use" ]; then
+  TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // ""')
+  TOOL_INPUT=$(echo "$INPUT" | jq -c '.tool_input // {}')
+  EVENT_JSON=$(jq -cn --arg ts "$TIMESTAMP" --arg event "$EVENT" \
+    --arg tool "$TOOL_NAME" --arg input "$TOOL_INPUT" \
+    '{ts: $ts, event: $event, tool: $tool, tool_input: ($input | fromjson)}')
 else
   EVENT_JSON=$(jq -cn --arg ts "$TIMESTAMP" --arg event "$EVENT" \
     '{ts: $ts, event: $event}')

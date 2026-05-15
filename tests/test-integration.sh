@@ -90,8 +90,7 @@ if [ "$DRY_RUN" = true ]; then
   run_test
   if [ -f "$PLUGIN_DIR/hooks/hooks.json" ] \
        && [ -x "$PLUGIN_DIR/hooks/run-hook.cmd" ] \
-       && [ -x "$PLUGIN_DIR/hooks/emit-event" ] \
-       && [ -x "$PLUGIN_DIR/hooks/approve-tool" ]; then
+       && [ -x "$PLUGIN_DIR/hooks/emit-event" ]; then
     pass "Hooks configured"
   else
     fail "Hooks missing"
@@ -113,8 +112,7 @@ echo ""
 # --- Test 1: Launch a worker ---
 run_test
 echo "Test 1: Launch worker..."
-# Short approval timeout so hook-gated tool calls don't block the test
-RESULT=$(CLAUDE_SESSION_DRIVER_APPROVAL_TIMEOUT=2 bash "$SCRIPTS_DIR/launch-worker.sh" "$TMUX_NAME" /tmp 2>&1)
+RESULT=$(bash "$SCRIPTS_DIR/launch-worker.sh" "$TMUX_NAME" /tmp 2>&1)
 SESSION_ID=$(echo "$RESULT" | jq -r '.session_id')
 EVENTS_FILE=$(echo "$RESULT" | jq -r '.events_file')
 

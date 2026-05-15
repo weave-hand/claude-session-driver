@@ -9,7 +9,7 @@ description: Use when acting as a project manager that delegates tasks to other 
 
 You can launch other Claude Code sessions as "workers" in tmux, send them prompts, monitor their progress through lifecycle events, read their output, and hand them off to a human operator. This gives you the ability to delegate work, run tasks in parallel, or set up supervised workflows.
 
-Workers are full interactive Claude Code sessions launched with `--dangerously-skip-permissions` so they never block on interactive permission prompts. A plugin (claude-session-driver) injects hooks that emit lifecycle events to a JSONL file, which you poll to track worker state. A PreToolUse hook gives the controller a window to inspect and approve or deny every tool call before it executes. The scripts handle all the plumbing: tmux management, session IDs, event files, and cleanup.
+Workers are full interactive Claude Code sessions launched with `--dangerously-skip-permissions`, so they execute tool calls without prompting. A plugin (claude-session-driver) injects hooks that emit lifecycle events — including a `pre_tool_use` event with the tool name and input — to a JSONL file, which you poll to track what each worker is doing. The events are observation-only; the plugin does not gate tool calls. The scripts handle all the plumbing: tmux management, session IDs, event files, and cleanup.
 
 ## Prerequisites
 
@@ -73,8 +73,8 @@ PID) or `$(date +%s)`. `launch-worker.sh` errors loudly on collision.
 
 If you lose track of running workers, `scripts/list-workers.sh` lists every
 alive worker (`--all` to include dead). `scripts/status.sh <worker>` returns
-`idle | working | awaiting-approval | terminated | gone` — useful before
-sending a follow-up prompt to avoid racing the worker mid-thought.
+`idle | working | terminated | gone` — useful before sending a follow-up
+prompt to avoid racing the worker mid-thought.
 
 ## Workflow
 
@@ -92,7 +92,7 @@ The script:
 - Waits for the `session_start` event (up to 30s)
 - Returns JSON with `session_id`, `tmux_name`, and `events_file`
 
-Permission bypass is automatic. The worker's PreToolUse hook provides controller-based gating (see Tool Approval below), so the built-in interactive permission dialog is redundant.
+Permission bypass is automatic — workers run with `--dangerously-skip-permissions` and execute tool calls without prompting. The PreToolUse hook still fires and emits a `pre_tool_use` event so you can watch what the worker is doing (see Watching Tool Calls below), but it does not gate.
 
 Pass extra `claude` CLI arguments after the working directory:
 ```bash
@@ -228,8 +228,7 @@ In the "Usage" column, `<worker>` means either a `session_id` (UUID) or a
 | `wait-for-event.sh` | `<worker> <event-type> [timeout=60] [--after-line N]` | Block until event or timeout |
 | `read-events.sh` | `<worker> [--last N] [--type T] [--follow]` | Read event stream |
 | `read-turn.sh` | `<worker> [--full]` | Format last turn as markdown |
-| `approve-tool.sh` | `<worker> <allow\|deny>` | Respond to a pending tool approval |
-| `status.sh` | `<worker>` | Print `idle / working / awaiting-approval / terminated / gone` |
+| `status.sh` | `<worker>` | Print `idle / working / terminated / gone` |
 | `stop-worker.sh` | `<worker>` | Gracefully stop and clean up |
 | `handoff.sh` | `<worker>` | Print the ready-to-paste "attach to tmux" instruction block |
 | `list-workers.sh` | `[--all]` | List alive workers (or all known workers with `--all`) |
@@ -357,34 +356,27 @@ echo "Your detailed instructions here..." > /tmp/worker-instructions.txt
 scripts/send-prompt.sh my-worker "Read /tmp/worker-instructions.txt and follow those instructions"
 ```
 
-### Tool Approval
+### Watching Tool Calls
 
-Every tool call the worker makes emits a `pre_tool_use` event and waits up to 30 seconds for a controller decision before auto-approving. This gives you a window to inspect and approve or deny each tool call.
+Workers run with `--dangerously-skip-permissions` and execute tool calls without prompting. The plugin does **not** gate tool calls — earlier versions tried to, but Claude Code ignores hook-returned permission decisions under that flag, so any "approval" was cosmetic. Removing the gate makes the threat model honest: a worker does what its prompt tells it to do.
 
-**To monitor and auto-approve (default):** Do nothing. If no decision is written within the timeout, the tool call proceeds.
-
-**To actively review tool calls:**
+Every tool call still emits a `pre_tool_use` event with the tool name and input, so you can watch what's happening in real time:
 
 ```bash
-# Watch for pending tool approvals
-PENDING_FILE="/tmp/claude-workers/${SESSION_ID}.tool-pending"
+# Tail the event stream to see each tool call as it fires
+tail -f /tmp/claude-workers/${SESSION_ID}.events.jsonl | jq -c 'select(.event=="pre_tool_use")'
 
-# Check if a tool call is waiting for approval
-if [ -f "$PENDING_FILE" ]; then
-  cat "$PENDING_FILE"  # Shows tool_name and tool_input
-
-  # Approve it
-  scripts/approve-tool.sh "$SESSION_ID" allow
-
-  # Or deny it
-  scripts/approve-tool.sh "$SESSION_ID" deny
-fi
+# Or filter after the fact
+scripts/read-events.sh "$SESSION_ID" --type pre_tool_use
 ```
 
-The timeout is configurable via the `CLAUDE_SESSION_DRIVER_APPROVAL_TIMEOUT` environment variable (default: 30 seconds). To change it, pass the env var when launching:
+If you see a worker doing something you don't want, stop it:
+
 ```bash
-RESULT=$(CLAUDE_SESSION_DRIVER_APPROVAL_TIMEOUT=60 scripts/launch-worker.sh my-worker ~/project)
+scripts/stop-worker.sh "$SESSION_ID"
 ```
+
+For workflows that require real per-call gating, this plugin is not the right tool — keep the worker's tool calls scoped through the prompt instead (don't tell it to do things you don't want it to do).
 
 ## Important Notes
 

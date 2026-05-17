@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.0.1] - 2026-05-17
+
+### Fixed
+- Workers no longer hang when the worker (or a subagent it spawns via the
+  `Agent` tool) calls `AskUserQuestion`. There is no human at a worker's
+  terminal to answer the modal, so the dialog would render in the worker's
+  tmux pane and block the turn forever — no `stop` event would fire, the
+  controller's wait would time out, and the worker would be wedged.
+  `launch-worker.sh` now passes `--disallowed-tools AskUserQuestion` to
+  the worker's `claude` invocation, which takes the tool off the menu
+  entirely and (verified) propagates to spawned subagents as well.
+
 ## [2.0.0] - 2026-05-15
 
 ### Changed

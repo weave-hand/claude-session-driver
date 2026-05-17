@@ -82,12 +82,21 @@ fi
 # --settings populates flagSettings with skipDangerousModePermissionPrompt,
 # silencing the bypass-permissions warning. Paired with
 # --dangerously-skip-permissions, which the user already consented to.
+#
+# --disallowed-tools AskUserQuestion: there is no human at the worker's
+# terminal to answer a question dialog. If the worker (or a subagent it
+# spawns) called AskUserQuestion, the modal would render in the worker's
+# tmux pane and block the turn forever — no Stop event ever fires, the
+# controller's wait times out, and the worker is wedged. Taking the tool
+# off the menu prevents the call entirely, and the disallow propagates
+# to subagents spawned via the Agent tool.
 tmux new-session -d -s "$TMUX_NAME" -c "$WORKING_DIR" \
   -e "CLAUDE_CODE_SSE_PORT=" \
   -e "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=" \
   claude --session-id "$SESSION_ID" --plugin-dir "$PLUGIN_DIR" \
     --settings '{"skipDangerousModePermissionPrompt":true}' \
     --dangerously-skip-permissions \
+    --disallowed-tools AskUserQuestion \
     "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}"
 
 # Content-aware trust-dialog accept. When claude opens in a working directory

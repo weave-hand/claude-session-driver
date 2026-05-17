@@ -145,6 +145,22 @@ else
   fail "--settings flag missing from argv"
 fi
 
+# --- Test 3: AskUserQuestion is disallowed ---
+# There's no human at the worker's terminal to answer the modal. If the
+# worker (or a spawned subagent) ever called AskUserQuestion, the dialog
+# would render in the worker's tmux pane and block the turn forever.
+run_test
+if echo "$ARGV_DUMP" | grep -qFx -- '--disallowed-tools'; then
+  DISALLOWED_LINE=$(echo "$ARGV_DUMP" | grep -A1 -Fx -- '--disallowed-tools' | tail -n1)
+  if [ "$DISALLOWED_LINE" = "AskUserQuestion" ]; then
+    pass "--disallowed-tools AskUserQuestion passed"
+  else
+    fail "--disallowed-tools value wrong: '$DISALLOWED_LINE'"
+  fi
+else
+  fail "--disallowed-tools flag missing from argv"
+fi
+
 # --- Scenario B: missing consent + non-interactive stdin refuses to launch ---
 run_test
 NO_CONSENT_HOME=$(mktemp -d)

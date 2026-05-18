@@ -90,13 +90,36 @@ else
   exit 2
 fi
 
+cmd_grant_consent() {
+  local consent_file="$HOME/.claude/.claude-session-driver-consent"
+  if [ -f "$consent_file" ]; then
+    echo "Consent already granted at $consent_file"
+    return 0
+  fi
+  cat <<EOF
+claude-session-driver runs workers with --dangerously-skip-permissions.
+Workers execute tool calls without prompting. By granting consent, you
+acknowledge this risk and accept responsibility for any actions the
+worker takes.
+
+Type 'yes' to grant consent:
+EOF
+  read -r reply
+  if [ "$reply" != "yes" ]; then
+    echo "Consent not granted." >&2
+    return 1
+  fi
+  mkdir -p "$(dirname "$consent_file")"
+  touch "$consent_file"
+  echo "Consent granted. Written: $consent_file"
+}
+
 shift  # consume the subcommand name
 
 case "$SUB" in
-  help)
-    usage
-    ;;
-  launch|list|grant-consent|\
+  help)            usage ;;
+  grant-consent)   cmd_grant_consent ;;
+  launch|list|\
   converse|send|wait-for-turn|status|\
   read-events|read-turn|stop|handoff|\
   session-id|events-file)

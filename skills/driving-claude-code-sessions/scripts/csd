@@ -505,7 +505,7 @@ EOF
   local shim_path="/tmp/claude-workers/bin/$tmux_name"
   cat > "$shim_path" <<EOF
 #!/bin/bash
-exec "$CSD_PATH" --worker $tmux_name "\$@"
+exec "$CSD_PATH" --worker "$tmux_name" "\$@"
 EOF
   chmod +x "$shim_path"
 

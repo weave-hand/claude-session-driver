@@ -70,7 +70,7 @@ fi
 
 # shim execs into csd with --worker baked in
 SHIM_BODY=$(cat "$EXPECTED_SHIM")
-if echo "$SHIM_BODY" | grep -q "exec.*csd.*--worker $TMUX_NAME"; then
+if echo "$SHIM_BODY" | grep -q "exec.*csd.*--worker \"$TMUX_NAME\""; then
   pass "shim execs csd with --worker"
 else
   fail "shim body" "$SHIM_BODY"

@@ -17,22 +17,12 @@ SCRIPT_DIR="$(dirname "$CSD_PATH")"
 # shellcheck source=_lib.sh
 source "$SCRIPT_DIR/_lib.sh"
 
-# Parse --worker (top-level flag, before subcommand)
-WORKER=""
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --worker)
-      if [ $# -lt 2 ]; then
-        echo "Error: --worker requires a value" >&2
-        exit 2
-      fi
-      WORKER="$2"; shift 2 ;;
-    --worker=*) WORKER="${1#--worker=}"; shift ;;
-    *) break ;;
-  esac
-done
+# Constants / arrays
+TOP_LEVEL_SUBS=(launch list grant-consent help)
+PER_WORKER_SUBS=(converse send wait-for-turn status read-events read-turn \
+                 stop handoff session-id events-file)
 
-SUB="${1:-}"
+# Functions
 
 usage() {
   cat <<EOF
@@ -59,36 +49,11 @@ Per-worker subcommands (require --worker, supplied by the shim):
 EOF
 }
 
-TOP_LEVEL_SUBS=(launch list grant-consent help)
-PER_WORKER_SUBS=(converse send wait-for-turn status read-events read-turn \
-                 stop handoff session-id events-file)
-
 is_in() {
   local needle="$1"; shift
   for x in "$@"; do [ "$x" = "$needle" ] && return 0; done
   return 1
 }
-
-if [ -z "$SUB" ]; then
-  usage >&2
-  exit 2
-fi
-
-if is_in "$SUB" "${TOP_LEVEL_SUBS[@]}"; then
-  if [ -n "$WORKER" ]; then
-    echo "Error: --worker is not valid for '$SUB' (top-level subcommand)" >&2
-    exit 2
-  fi
-elif is_in "$SUB" "${PER_WORKER_SUBS[@]}"; then
-  if [ -z "$WORKER" ]; then
-    echo "Error: --worker <name> is required for '$SUB'" >&2
-    exit 2
-  fi
-else
-  echo "Error: unknown subcommand '$SUB'" >&2
-  usage >&2
-  exit 2
-fi
 
 cmd_grant_consent() {
   local consent_file="$HOME/.claude/.claude-session-driver-consent"
@@ -114,13 +79,88 @@ EOF
   echo "Consent granted. Written: $consent_file"
 }
 
+cmd_list() {
+  local show_dead=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --all) show_dead=1; shift ;;
+      *) echo "Error: unknown option '$1' for list" >&2; return 2 ;;
+    esac
+  done
+
+  local worker_dir="${CSD_WORKER_DIR:-/tmp/claude-workers}"
+  shopt -s nullglob
+  local metas=("$worker_dir"/*.meta)
+  shopt -u nullglob
+  if [ "${#metas[@]}" -eq 0 ]; then
+    echo "No workers found" >&2
+    return 0
+  fi
+
+  printf '%s\t%s\t%s\t%s\t%s\n' STATUS TMUX SESSION_ID SHIM CWD
+  local meta tmux_name session_id cwd status
+  for meta in "${metas[@]}"; do
+    tmux_name=$(jq -r '.tmux_name' "$meta")
+    session_id=$(jq -r '.session_id' "$meta")
+    cwd=$(jq -r '.cwd' "$meta")
+    if tmux has-session -t "$tmux_name" 2>/dev/null; then
+      status=alive
+    else
+      status=dead
+      [ "$show_dead" -eq 0 ] && continue
+    fi
+    printf '%s\t%s\t%s\t%s\t%s\n' "$status" "$tmux_name" "$session_id" \
+      "/tmp/claude-workers/bin/$tmux_name" "$cwd"
+  done
+}
+
+# --- main: arg parsing, validation, dispatch ---
+
+# Parse --worker (top-level flag, before subcommand)
+WORKER=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --worker)
+      if [ $# -lt 2 ]; then
+        echo "Error: --worker requires a value" >&2
+        exit 2
+      fi
+      WORKER="$2"; shift 2 ;;
+    --worker=*) WORKER="${1#--worker=}"; shift ;;
+    *) break ;;
+  esac
+done
+
+SUB="${1:-}"
+
+if [ -z "$SUB" ]; then
+  usage >&2
+  exit 2
+fi
+
+if is_in "$SUB" "${TOP_LEVEL_SUBS[@]}"; then
+  if [ -n "$WORKER" ]; then
+    echo "Error: --worker is not valid for '$SUB' (top-level subcommand)" >&2
+    exit 2
+  fi
+elif is_in "$SUB" "${PER_WORKER_SUBS[@]}"; then
+  if [ -z "$WORKER" ]; then
+    echo "Error: --worker <name> is required for '$SUB'" >&2
+    exit 2
+  fi
+else
+  echo "Error: unknown subcommand '$SUB'" >&2
+  usage >&2
+  exit 2
+fi
+
 shift  # consume the subcommand name
 
 case "$SUB" in
   help)            usage ;;
   grant-consent)   cmd_grant_consent ;;
-  launch|list|\
-  converse|send|wait-for-turn|status|\
+  list)            cmd_list "$@" ;;
+  launch|converse|send|wait-for-turn|status|\
   read-events|read-turn|stop|handoff|\
   session-id|events-file)
     # Stubs — implemented in later tasks.

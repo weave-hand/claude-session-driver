@@ -88,7 +88,7 @@ cmd_list() {
     esac
   done
 
-  local worker_dir="${CSD_WORKER_DIR:-/tmp/claude-workers}"
+  local worker_dir=/tmp/claude-workers
   shopt -s nullglob
   local metas=("$worker_dir"/*.meta)
   shopt -u nullglob
@@ -110,7 +110,7 @@ cmd_list() {
       [ "$show_dead" -eq 0 ] && continue
     fi
     printf '%s\t%s\t%s\t%s\t%s\n' "$status" "$tmux_name" "$session_id" \
-      "/tmp/claude-workers/bin/$tmux_name" "$cwd"
+      "$worker_dir/bin/$tmux_name" "$cwd"
   done
 }
 

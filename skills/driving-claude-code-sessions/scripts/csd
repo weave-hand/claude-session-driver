@@ -205,6 +205,74 @@ cmd_wait_for_turn() {
   return 1
 }
 
+cmd_read_turn() {
+  local full=false
+  if [ "${1:-}" = "--full" ]; then
+    full=true
+    shift
+  fi
+
+  local sid cwd encoded log_file last_prompt_line
+  sid=$(resolve_session "$WORKER")
+  cwd=$(jq -r '.cwd' "/tmp/claude-workers/${sid}.meta" 2>/dev/null)
+  if [ -z "$cwd" ] || [ "$cwd" = "null" ]; then
+    echo "Error: Could not determine working directory from meta file" >&2
+    return 1
+  fi
+  if [ -d "$cwd" ]; then
+    cwd=$(cd "$cwd" && pwd -P)
+  fi
+  encoded=$(echo "$cwd" | sed 's|/|-|g')
+  log_file="$HOME/.claude/projects/${encoded}/${sid}.jsonl"
+
+  if [ ! -f "$log_file" ]; then
+    echo "Error: Session log not found at $log_file" >&2
+    return 1
+  fi
+
+  last_prompt_line=$(grep -n '"type":"user"' "$log_file" \
+    | grep -v '"tool_result"' \
+    | grep -v '<local-command' \
+    | grep -v '<command-name>' \
+    | tail -1 \
+    | cut -d: -f1)
+
+  if [ -z "$last_prompt_line" ]; then
+    echo "No user prompt found in session log" >&2
+    return 1
+  fi
+
+  tail -n +"$last_prompt_line" "$log_file" \
+    | jq -r --argjson full "$full" '
+      select(.type == "assistant" or .type == "user") |
+      if .type == "user" then
+        if (.message.content | type) == "string" then
+          if (.message.content | test("^<(local-command|command-name)")) then empty
+          else "---\n\n**Prompt:** " + .message.content + "\n" end
+        else
+          .message.content[] | select(.type == "tool_result") |
+          if .is_error then
+            "**Tool Error:**\n```\n" + (.content // "(no output)") + "\n```\n"
+          else
+            if $full then
+              "**Result:**\n```\n" + (.content // "(no output)") + "\n```\n"
+            else
+              "**Result:**\n```\n" + ((.content // "(no output)") | split("\n") | if length > 5 then (.[0:5] | join("\n")) + "\n... (" + (length | tostring) + " lines total)" else join("\n") end) + "\n```\n"
+            end
+          end
+        end
+      elif .type == "assistant" then
+        .message.content[] |
+        if .type == "thinking" then "> **Thinking:** " + (.thinking | split("\n") | join("\n> ")) + "\n"
+        elif .type == "text" then .text + "\n"
+        elif .type == "tool_use" then "**Tool: " + .name + "**\n```json\n" + (.input | tostring) + "\n```\n"
+        else empty
+        end
+      else empty
+      end
+    ' 2>/dev/null
+}
+
 cmd_list() {
   local show_dead=0
   while [ $# -gt 0 ]; do
@@ -291,8 +359,9 @@ case "$SUB" in
   status)           cmd_status ;;
   read-events)      cmd_read_events "$@" ;;
   wait-for-turn)  cmd_wait_for_turn "$@" ;;
+  read-turn)      cmd_read_turn "$@" ;;
   launch|converse|send|\
-  read-turn|stop|handoff)
+  stop|handoff)
     # Stubs — implemented in later tasks.
     echo "Error: '$SUB' not yet implemented" >&2
     exit 99

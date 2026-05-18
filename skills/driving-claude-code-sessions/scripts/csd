@@ -273,6 +273,29 @@ cmd_read_turn() {
     ' 2>/dev/null
 }
 
+cmd_send() {
+  local prompt="${1:?Usage: send <prompt-text>}"
+  local sid tmux_name
+  sid=$(resolve_session "$WORKER")
+  tmux_name=$(jq -r '.tmux_name' "/tmp/claude-workers/${sid}.meta")
+
+  if ! tmux has-session -t "$tmux_name" 2>/dev/null; then
+    echo "Error: tmux session '$tmux_name' does not exist" >&2
+    return 1
+  fi
+
+  local ESC PASTE_START PASTE_END SAFE
+  ESC=$'\x1b'
+  PASTE_START="${ESC}[200~"
+  PASTE_END="${ESC}[201~"
+  SAFE=${prompt//${PASTE_END}/}
+  SAFE=${SAFE//${PASTE_START}/}
+
+  tmux send-keys -t "$tmux_name" -l "${PASTE_START}${SAFE}${PASTE_END}"
+  sleep 0.1
+  tmux send-keys -t "$tmux_name" Enter
+}
+
 cmd_list() {
   local show_dead=0
   while [ $# -gt 0 ]; do
@@ -360,7 +383,8 @@ case "$SUB" in
   read-events)      cmd_read_events "$@" ;;
   wait-for-turn)  cmd_wait_for_turn "$@" ;;
   read-turn)      cmd_read_turn "$@" ;;
-  launch|converse|send|\
+  send)             cmd_send "$@" ;;
+  launch|converse|\
   stop|handoff)
     # Stubs — implemented in later tasks.
     echo "Error: '$SUB' not yet implemented" >&2

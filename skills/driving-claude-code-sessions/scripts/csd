@@ -222,7 +222,7 @@ cmd_read_turn() {
   if [ -d "$cwd" ]; then
     cwd=$(cd "$cwd" && pwd -P)
   fi
-  encoded=$(echo "$cwd" | sed 's|/|-|g')
+  encoded="${cwd//\//-}"
   log_file="$HOME/.claude/projects/${encoded}/${sid}.jsonl"
 
   if [ ! -f "$log_file" ]; then
@@ -292,7 +292,7 @@ cmd_converse() {
   if [ -d "$cwd" ]; then
     cwd=$(cd "$cwd" && pwd -P)
   fi
-  encoded=$(echo "$cwd" | sed 's|/|-|g')
+  encoded="${cwd//\//-}"
   log_file="$HOME/.claude/projects/${encoded}/${sid}.jsonl"
   event_file="/tmp/claude-workers/${sid}.events.jsonl"
 
@@ -320,8 +320,8 @@ cmd_converse() {
     return 1
   fi
 
-  local i after_count
-  for i in $(seq 1 20); do
+  local after_count
+  for _ in $(seq 1 20); do
     [ -f "$log_file" ] || { sleep 0.1; continue; }
     after_count=$(count_text_messages)
     if [ "$after_count" -gt "$before_count" ]; then

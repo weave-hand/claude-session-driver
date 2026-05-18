@@ -1,5 +1,29 @@
 # Changelog
 
+## 3.0.0 — 2026-05-18
+
+### Breaking changes
+- Replaced 12 per-operation scripts with a single `csd` CLI at
+  `skills/driving-claude-code-sessions/scripts/csd`. The old scripts
+  (`launch-worker.sh`, `converse.sh`, `send-prompt.sh`,
+  `wait-for-event.sh`, `read-events.sh`, `read-turn.sh`, `status.sh`,
+  `stop-worker.sh`, `handoff.sh`, `list-workers.sh`, `current.sh`,
+  `grant-consent.sh`) are removed.
+- `csd launch` writes a per-worker shim at
+  `/tmp/claude-workers/bin/<tmux-name>` and prints that path on stdout.
+  All per-worker operations go through the shim — see the rewritten
+  SKILL.md for the new workflow.
+- `wait-for-event` is replaced by `wait-for-turn`, which matches `stop`
+  OR `session_end` (the only two events that signal "controller's
+  turn"). Raw-event waits are no longer supported; use
+  `$WORKER read-events --type T --follow` if you need ambient
+  observation.
+- `current` is removed — it returned "most-recently-touched meta file,"
+  which silently misleads in multi-worker controllers. Use `csd list`.
+- The meta file format gains `cwd` (was already present) and
+  `invocation` (new) fields. Old workers from prior versions are not
+  upgraded; relaunch them.
+
 ## [2.0.1] - 2026-05-17
 
 ### Fixed

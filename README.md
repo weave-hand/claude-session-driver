@@ -10,7 +10,7 @@ A single Claude session works on one task at a time. With this plugin, a control
 
 Workers run with `--dangerously-skip-permissions` and execute tool calls without prompting. The plugin's hooks write lifecycle events to a JSONL file — session start, prompt submitted, each tool call (with name and input), stop, and session end — so a controller can watch what each worker is doing. The events are observation-only; the plugin does not gate tool calls.
 
-The controller orchestrates workers through shell scripts that manage tmux sessions, poll events, read conversation logs, and clean up.
+The controller orchestrates workers through a single CLI (`csd`) that manages tmux sessions, polls events, reads conversation logs, and cleans up.
 
 ## Installation
 
@@ -36,17 +36,47 @@ Install the plugin and ask Claude to manage a project. The `driving-claude-code-
 - **Supervise:** Hold a multi-turn conversation with a worker, reviewing each response.
 - **Hand off:** Pass a running worker session to a human operator in tmux.
 
-## Scripts
+See `skills/driving-claude-code-sessions/SKILL.md` for detailed usage patterns.
 
-| Script | Purpose |
-|--------|---------|
-| `launch-worker.sh` | Start a worker session in tmux |
-| `converse.sh` | Send a prompt, wait, return the response |
-| `send-prompt.sh` | Send a prompt without waiting |
-| `wait-for-event.sh` | Block until a lifecycle event appears |
-| `read-events.sh` | Read and filter the event stream |
-| `read-turn.sh` | Format the last turn as markdown |
-| `stop-worker.sh` | Stop a worker and clean up |
+## CLI
+
+All operations go through a single binary at `skills/driving-claude-code-sessions/scripts/csd`.
+
+### Skill-path subcommands
+
+| Subcommand | Purpose |
+|------------|---------|
+| `csd launch <name> <cwd> [-- claude-args...]` | Bootstrap a worker; prints a shim path to stdout |
+| `csd list [--all]` | List active (or all) workers |
+| `csd grant-consent` | One-time consent flow (required before first launch) |
+
+`csd launch` prints the shim path to stdout and a human-readable panel to stderr. Capture it:
+
+```bash
+WORKER=$(csd launch my-worker /path/to/project)
+```
+
+### Per-worker subcommands
+
+Once you have a shim path, invoke it directly or use `csd --worker <name> <sub>`:
+
+| Subcommand | Purpose |
+|------------|---------|
+| `$WORKER converse [--with-turn] <prompt> [timeout]` | Send a prompt, wait, return the response |
+| `$WORKER send <prompt>` | Send a prompt without waiting |
+| `$WORKER wait-for-turn [timeout]` | Block until the worker finishes a turn |
+| `$WORKER read-turn [--full]` | Format the last turn as markdown |
+| `$WORKER read-events [--last N] [--type T] [--follow]` | Read and filter the event stream |
+| `$WORKER status` | Print worker status (idle/working/terminated/gone) |
+| `$WORKER stop` | Stop the worker and clean up |
+| `$WORKER handoff` | Print tmux attach instructions for a human takeover |
+| `$WORKER session-id` | Print the session UUID |
+| `$WORKER events-file` | Print the path to the JSONL event file |
+
+### Design docs
+
+- `docs/superpowers/specs/` — design specifications
+- `docs/superpowers/plans/` — implementation plans
 
 ## License
 

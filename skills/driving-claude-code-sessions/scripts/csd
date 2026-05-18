@@ -366,6 +366,24 @@ cmd_send() {
   tmux send-keys -t "$tmux_name" Enter
 }
 
+cmd_handoff() {
+  local sid tmux_name
+  sid=$(resolve_session "$WORKER")
+  tmux_name=$(jq -r '.tmux_name' "/tmp/claude-workers/${sid}.meta")
+  cat <<EOF
+The worker is running in tmux session '$tmux_name'. To take over:
+
+    tmux attach -t $tmux_name
+
+Once attached, you can type to the worker directly. Detach with Ctrl-B d to
+return without ending the session.
+
+Leave the worker running. The controller can resume by sending another
+prompt — do not run \$WORKER stop unless you actually want to terminate
+the session.
+EOF
+}
+
 cmd_list() {
   local show_dead=0
   while [ $# -gt 0 ]; do
@@ -455,8 +473,9 @@ case "$SUB" in
   read-turn)      cmd_read_turn "$@" ;;
   send)             cmd_send "$@" ;;
   converse)         cmd_converse "$@" ;;
+  handoff)          cmd_handoff ;;
   launch|\
-  stop|handoff)
+  stop)
     # Stubs — implemented in later tasks.
     echo "Error: '$SUB' not yet implemented" >&2
     exit 99

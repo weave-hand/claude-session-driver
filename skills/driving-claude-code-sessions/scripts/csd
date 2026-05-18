@@ -273,6 +273,76 @@ cmd_read_turn() {
     ' 2>/dev/null
 }
 
+cmd_converse() {
+  local with_turn=0
+  if [ "${1:-}" = "--with-turn" ]; then
+    with_turn=1
+    shift
+  fi
+  local prompt="${1:?Usage: converse [--with-turn] <prompt> [timeout=120]}"
+  local timeout="${2:-120}"
+
+  local sid cwd encoded log_file event_file
+  sid=$(resolve_session "$WORKER")
+  cwd=$(jq -r '.cwd' "/tmp/claude-workers/${sid}.meta" 2>/dev/null)
+  if [ -z "$cwd" ] || [ "$cwd" = "null" ]; then
+    echo "Error: Could not determine working directory from meta file" >&2
+    return 1
+  fi
+  if [ -d "$cwd" ]; then
+    cwd=$(cd "$cwd" && pwd -P)
+  fi
+  encoded=$(echo "$cwd" | sed 's|/|-|g')
+  log_file="$HOME/.claude/projects/${encoded}/${sid}.jsonl"
+  event_file="/tmp/claude-workers/${sid}.events.jsonl"
+
+  count_text_messages() {
+    if [ ! -f "$log_file" ]; then echo 0; return; fi
+    local r
+    r=$(grep '"type":"assistant"' "$log_file" \
+        | jq -s '[.[] | select(.message.content | any(.type == "text"))] | length' 2>/dev/null) || r=0
+    echo "$r"
+  }
+  last_text_response() {
+    grep '"type":"assistant"' "$log_file" \
+      | jq -rs 'map(select(.message.content | any(.type == "text"))) | last | [.message.content[] | select(.type == "text") | .text] | join("\n")' 2>/dev/null
+  }
+
+  local before_count after_line
+  before_count=$(count_text_messages)
+  after_line=0
+  [ -f "$event_file" ] && after_line=$(wc -l < "$event_file" | tr -d ' ')
+
+  cmd_send "$prompt"
+
+  if ! cmd_wait_for_turn "$timeout" --after-line "$after_line" >/dev/null; then
+    echo "Error: Worker did not finish within ${timeout}s" >&2
+    return 1
+  fi
+
+  local i after_count
+  for i in $(seq 1 20); do
+    [ -f "$log_file" ] || { sleep 0.1; continue; }
+    after_count=$(count_text_messages)
+    if [ "$after_count" -gt "$before_count" ]; then
+      if [ "$with_turn" -eq 1 ]; then
+        cmd_read_turn
+        return 0
+      fi
+      local response
+      response=$(last_text_response)
+      if [ -n "$response" ]; then
+        echo "$response"
+        return 0
+      fi
+    fi
+    sleep 0.1
+  done
+
+  echo "Error: Timed out waiting for assistant response in session log" >&2
+  return 1
+}
+
 cmd_send() {
   local prompt="${1:?Usage: send <prompt-text>}"
   local sid tmux_name
@@ -384,7 +454,8 @@ case "$SUB" in
   wait-for-turn)  cmd_wait_for_turn "$@" ;;
   read-turn)      cmd_read_turn "$@" ;;
   send)             cmd_send "$@" ;;
-  launch|converse|\
+  converse)         cmd_converse "$@" ;;
+  launch|\
   stop|handoff)
     # Stubs — implemented in later tasks.
     echo "Error: '$SUB' not yet implemented" >&2

@@ -314,12 +314,12 @@ cmd_converse() {
     if [ ! -f "$log_file" ]; then echo 0; return; fi
     local r
     r=$(grep '"type":"assistant"' "$log_file" \
-        | jq -s '[.[] | select(.message.content | any(.type == "text"))] | length' 2>/dev/null) || r=0
+        | jq -s '[.[] | select(.message.content | (type == "array") and any(.type == "text"))] | length' 2>/dev/null) || r=0
     echo "$r"
   }
   last_text_response() {
     grep '"type":"assistant"' "$log_file" \
-      | jq -rs 'map(select(.message.content | any(.type == "text"))) | last | [.message.content[] | select(.type == "text") | .text] | join("\n")' 2>/dev/null
+      | jq -rs 'map(select(.message.content | (type == "array") and any(.type == "text"))) | last | [.message.content[] | select(.type == "text") | .text] | join("\n")' 2>/dev/null
   }
 
   local before_count after_line

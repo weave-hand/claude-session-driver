@@ -14,15 +14,19 @@ TMUX_NAME="test-csd-converse"
 SID="test-conv-001"
 TMUX_NAME2="test-csd-converse-wt"
 SID2="test-conv-002"
+TMUX_NAME3="test-csd-converse-null"
+SID3="test-conv-003"
 
 # Declare cleanup before first use; FAKE_HOME/LOG_DIR/LOG set after cleanup runs
 FAKE_HOME=""
 cleanup() {
   tmux kill-session -t "$TMUX_NAME" 2>/dev/null || true
   tmux kill-session -t "$TMUX_NAME2" 2>/dev/null || true
+  tmux kill-session -t "$TMUX_NAME3" 2>/dev/null || true
   [ -n "$FAKE_HOME" ] && rm -rf "$FAKE_HOME"
   rm -f "$WDIR/$SID.meta" "$WDIR/$SID.events.jsonl"
   rm -f "$WDIR/$SID2.meta" "$WDIR/$SID2.events.jsonl"
+  rm -f "$WDIR/$SID3.meta" "$WDIR/$SID3.events.jsonl"
 }
 trap cleanup EXIT
 cleanup
@@ -105,6 +109,40 @@ echo "$WT_OUTPUT" | grep -q "\*\*Tool: Bash\*\*" && pass "--with-turn surfaces t
 # The final text should still appear.
 echo "$WT_OUTPUT" | grep -q "final text" && pass "--with-turn includes assistant text" \
   || fail "wt text" "$WT_OUTPUT"
+
+# --- null .message.content must not break detection ---
+# Regression: some Claude versions (e.g. 2.1.80) write assistant entries with
+# message.content == null. jq `any(.type=="text")` over null throws "Cannot
+# iterate over null", which the `2>/dev/null || r=0` swallow turned into a
+# permanent count of 0 — so converse never saw a new response and timed out.
+LOG3="$LOG_DIR/$SID3.jsonl"
+tmux new-session -d -s "$TMUX_NAME3" 'cat >/dev/null'
+echo "{\"tmux_name\":\"$TMUX_NAME3\",\"session_id\":\"$SID3\",\"cwd\":\"$CWD\"}" > "$WDIR/$SID3.meta"
+echo '{"ts":"t0","event":"session_start","cwd":"'"$CWD"'"}' > "$WDIR/$SID3.events.jsonl"
+# Pre-existing log carries a null-content assistant message beside a real one.
+cat > "$LOG3" <<'JSON'
+{"type":"user","message":{"content":"prior prompt"}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"prior reply"}]}}
+{"type":"assistant","message":{"content":null}}
+JSON
+
+# Inject another null-content message plus the real new response.
+(
+  sleep 0.5
+  cat >> "$LOG3" <<'JSON'
+{"type":"user","message":{"content":"null-safe prompt"}}
+{"type":"assistant","message":{"content":null}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"null-safe response"}]}}
+JSON
+  echo '{"ts":"t1","event":"stop"}' >> "$WDIR/$SID3.events.jsonl"
+) &
+
+NULL_OUTPUT=$(HOME="$FAKE_HOME" bash "$CSD" --worker "$TMUX_NAME3" converse "null-safe prompt" 5)
+NULL_EC=$?
+
+[ "$NULL_EC" -eq 0 ] && pass "converse exits 0 with null content present" || fail "null exit" "got $NULL_EC; output: $NULL_OUTPUT"
+echo "$NULL_OUTPUT" | grep -q "null-safe response" && pass "detects response past null content" || fail "null text" "$NULL_OUTPUT"
+echo "$NULL_OUTPUT" | grep -q "prior reply" && fail "returns old text" "should only return new" || pass "null scenario does not return old response"
 
 TOTAL=$((PASS_COUNT + FAIL_COUNT))
 echo ""

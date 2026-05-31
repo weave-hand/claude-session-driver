@@ -428,6 +428,18 @@ cmd_converse() {
   return 1
 }
 
+# Has a user_prompt_submit event appeared after line $2 of event file $1?
+# This is the worker's ground-truth signal that Claude Code accepted a prompt.
+_prompt_submitted_since() {
+  local event_file="$1" before_line="$2"
+  [ -f "$event_file" ] || return 1
+  local current
+  current=$(wc -l < "$event_file" | tr -d ' ')
+  [ "$current" -gt "$before_line" ] || return 1
+  tail -n +"$((before_line + 1))" "$event_file" \
+    | grep -q '"event":"user_prompt_submit"'
+}
+
 cmd_send() {
   local prompt="${1:?Usage: send <prompt-text>}"
   local sid tmux_name
@@ -439,6 +451,10 @@ cmd_send() {
     return 1
   fi
 
+  local event_file="/tmp/claude-workers/${sid}.events.jsonl"
+  local before_line=0
+  [ -f "$event_file" ] && before_line=$(wc -l < "$event_file" | tr -d ' ')
+
   local ESC PASTE_START PASTE_END SAFE
   ESC=$'\x1b'
   PASTE_START="${ESC}[200~"
@@ -447,8 +463,31 @@ cmd_send() {
   SAFE=${SAFE//${PASTE_START}/}
 
   tmux send-keys -t "$tmux_name" -l "${PASTE_START}${SAFE}${PASTE_END}"
-  sleep 0.1
+
+  # Claude Code converts the bracketed paste into a pending-input widget
+  # asynchronously. In slow or remote tmux, an Enter sent on a fixed delay can
+  # land before that widget exists and be swallowed, leaving the prompt pasted
+  # but unsubmitted (issue #20). Confirm submission via the user_prompt_submit
+  # event the worker emits when it accepts the prompt, re-sending Enter until
+  # that event appears or we time out. A stray retry Enter after a successful
+  # submit hits an empty composer and is a harmless no-op.
+  local submit_timeout="${CSD_SUBMIT_TIMEOUT:-10}"
+  local retry_interval="${CSD_SUBMIT_RETRY_INTERVAL:-2}"
+  local waited=0 since_enter=0
   tmux send-keys -t "$tmux_name" Enter
+  while ! _prompt_submitted_since "$event_file" "$before_line"; do
+    if awk "BEGIN{exit !($waited >= $submit_timeout)}"; then
+      echo "Error: prompt pasted but worker did not confirm submission within ${submit_timeout}s (issue #20). The tmux session may be slow to accept the paste; raise CSD_SUBMIT_TIMEOUT to allow more time." >&2
+      return 1
+    fi
+    sleep 0.25
+    waited=$(awk "BEGIN{print $waited + 0.25}")
+    since_enter=$(awk "BEGIN{print $since_enter + 0.25}")
+    if awk "BEGIN{exit !($since_enter >= $retry_interval)}"; then
+      tmux send-keys -t "$tmux_name" Enter
+      since_enter=0
+    fi
+  done
 }
 
 cmd_stop() {

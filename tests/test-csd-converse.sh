@@ -44,9 +44,17 @@ mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/$SID.jsonl"
 mkdir -p "$WDIR"
 
-# Set up: real tmux session that swallows input (we don't care about send),
-# meta with cwd, empty event file, pre-existing log with a prior turn.
-tmux new-session -d -s "$TMUX_NAME" 'cat >/dev/null'
+# A fake worker pane that emits a user_prompt_submit event whenever it receives
+# input — mirroring the real emit-event hook firing when Claude Code accepts a
+# pasted prompt. cmd_send waits for this event to confirm submission (#20).
+spawn_worker_pane() {  # $1=tmux_name  $2=events_file
+  tmux new-session -d -s "$1" \
+    "while IFS= read -r _l; do printf '%s\n' '{\"ts\":\"tps\",\"event\":\"user_prompt_submit\"}' >> '$2'; done"
+}
+
+# Set up: fake worker pane (confirms submission), meta with cwd, initial event
+# file, pre-existing log with a prior turn.
+spawn_worker_pane "$TMUX_NAME" "$WDIR/$SID.events.jsonl"
 echo "{\"tmux_name\":\"$TMUX_NAME\",\"session_id\":\"$SID\",\"cwd\":\"$CWD\"}" > "$WDIR/$SID.meta"
 echo '{"ts":"t0","event":"session_start","cwd":"'"$CWD"'"}' > "$WDIR/$SID.events.jsonl"
 
@@ -76,7 +84,7 @@ echo "$OUTPUT" | grep -q "first response" && fail "returns old text" "should onl
 
 # --- --with-turn returns full markdown rather than just text ---
 LOG2="$LOG_DIR/$SID2.jsonl"
-tmux new-session -d -s "$TMUX_NAME2" 'cat >/dev/null'
+spawn_worker_pane "$TMUX_NAME2" "$WDIR/$SID2.events.jsonl"
 echo "{\"tmux_name\":\"$TMUX_NAME2\",\"session_id\":\"$SID2\",\"cwd\":\"$CWD\"}" > "$WDIR/$SID2.meta"
 echo '{"ts":"t0","event":"session_start","cwd":"'"$CWD"'"}' > "$WDIR/$SID2.events.jsonl"
 cat > "$LOG2" <<'JSON'
@@ -116,7 +124,7 @@ echo "$WT_OUTPUT" | grep -q "final text" && pass "--with-turn includes assistant
 # iterate over null", which the `2>/dev/null || r=0` swallow turned into a
 # permanent count of 0 — so converse never saw a new response and timed out.
 LOG3="$LOG_DIR/$SID3.jsonl"
-tmux new-session -d -s "$TMUX_NAME3" 'cat >/dev/null'
+spawn_worker_pane "$TMUX_NAME3" "$WDIR/$SID3.events.jsonl"
 echo "{\"tmux_name\":\"$TMUX_NAME3\",\"session_id\":\"$SID3\",\"cwd\":\"$CWD\"}" > "$WDIR/$SID3.meta"
 echo '{"ts":"t0","event":"session_start","cwd":"'"$CWD"'"}' > "$WDIR/$SID3.events.jsonl"
 # Pre-existing log carries a null-content assistant message beside a real one.

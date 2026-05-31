@@ -36,9 +36,11 @@ mkdir -p "$LOG_DIR" "$WDIR"
 LOG="$LOG_DIR/$SID.jsonl"
 EVENT_FILE="$WDIR/$SID.events.jsonl"
 
-# Real tmux session that swallows input. Worker meta + initial event file so
-# cmd_converse can find them; no assistant response is ever produced -> timeout.
-tmux new-session -d -s "$TMUX_NAME" 'cat >/dev/null'
+# Fake worker pane: emits a user_prompt_submit event on every input it receives
+# (mirroring the real hook, so cmd_send can confirm submission per #20), but
+# never produces an assistant response -> converse still times out.
+tmux new-session -d -s "$TMUX_NAME" \
+  "while IFS= read -r _l; do printf '%s\n' '{\"ts\":\"tps\",\"event\":\"user_prompt_submit\"}' >> '$EVENT_FILE'; done"
 echo "{\"tmux_name\":\"$TMUX_NAME\",\"session_id\":\"$SID\",\"cwd\":\"$CWD\"}" > "$WDIR/$SID.meta"
 echo '{"ts":"t0","event":"session_start","cwd":"'"$CWD"'"}' > "$EVENT_FILE"
 cat > "$LOG" <<'JSON'

@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.0.1] - 2026-05-31
+
+### Fixed
+- `csd send` could paste a prompt without submitting it in slow or remote
+  tmux sessions: the single Enter, sent after a fixed `sleep 0.1`, landed
+  before Claude Code had converted the bracketed paste into its input
+  widget and was swallowed, leaving the prompt pasted but unsubmitted
+  (#20). `send` now confirms submission via the worker's
+  `user_prompt_submit` event and re-sends Enter until that event appears,
+  failing loudly instead of returning success if it never does.
+
+### Added
+- `CSD_SUBMIT_TIMEOUT` (default 10s) and `CSD_SUBMIT_RETRY_INTERVAL`
+  (default 2s) tune how long `csd send` waits for submission confirmation
+  and how often it re-sends Enter — raise them for slow remote sessions.
+
 ## [3.0.0] - 2026-05-18
 
 ### Breaking changes

@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Fixed
+- Workers no longer fall back to the wrong model provider (e.g. an expired
+  Bedrock token → first-turn 403) when a stale `CLAUDE_CODE_USE_BEDROCK` (or
+  other `CLAUDE_CODE_USE_*`) sits in the tmux server's global environment, and
+  workers under a host-brokered controller (cmux, IDE extensions) now keep their
+  host-managed auth instead of being severed from it (#18). `csd` now pins the
+  worker's provider/auth environment by clearing stale values without forcing
+  new ones: it always clears `CLAUDE_CODE_SSE_PORT` (IDE-only) and, for
+  `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST` and the `CLAUDE_CODE_USE_*` provider
+  selectors, pins each empty only when it's absent from the controller's own
+  environment (killing a stale tmux-global value), otherwise leaving it to
+  inherit alongside its credentials. See
+  `docs/reference/claude-code-provider-auth-env.md`.
+
 ### Added
 - `csd adopt <tmux-name> <cwd> <session-id> [-- claude-args...]` — re-adopt an
   existing Claude session as a driveable worker via `claude --resume`. Restores

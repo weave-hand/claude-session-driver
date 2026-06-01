@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [3.0.2] - 2026-05-31
 
 ### Fixed
 - Workers no longer fall back to the wrong model provider (e.g. an expired

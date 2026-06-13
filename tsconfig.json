@@ -1,0 +1,25 @@
+{
+  "include": [
+    "src/**/*.ts",
+    "tests/**/*.ts",
+    "tsup.config.ts",
+    "vitest.config.ts"
+  ],
+  "exclude": ["node_modules", "dist", ".claude/worktrees"],
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "useUnknownInCatchVariables": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true
+  }
+}

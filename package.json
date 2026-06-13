@@ -1,0 +1,27 @@
+{
+  "name": "claude-session-driver",
+  "private": true,
+  "packageManager": "pnpm@10.32.1",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "build": "tsup",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dist:check": "pnpm build && git diff --exit-code dist/",
+    "prepare": "lefthook install || true"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.15",
+    "@types/node": "^22.19.13",
+    "lefthook": "^2.1.8",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

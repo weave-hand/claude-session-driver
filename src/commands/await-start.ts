@@ -21,12 +21,13 @@ export interface AwaitStartOpts {
   pollMs?: number;
 }
 
-export interface AwaitStartResult {
-  /** True once a `session_start` event is observed. */
-  started: boolean;
-  /** Populated on timeout: the full stderr text the caller should emit. */
-  failureMessage?: string;
-}
+/**
+ * Success carries no message; failure always carries the full stderr text the
+ * caller should emit. The discriminated union makes that invariant type-enforced.
+ */
+export type AwaitStartResult =
+  | { started: true }
+  | { started: false; failureMessage: string };
 
 function sawSessionStart(eventFile: string): boolean {
   return readRawLines(eventFile).some(
@@ -38,7 +39,7 @@ function sawSessionStart(eventFile: string): boolean {
 function paneTail(pane: string, n: number): string {
   return pane
     .split('\n')
-    .map((line) => line.replace(/[ \t]+$/, ''))
+    .map((line) => line.replace(/\s+$/, ''))
     .filter((line) => line.length > 0)
     .slice(-n)
     .join('\n');

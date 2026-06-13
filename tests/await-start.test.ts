@@ -103,7 +103,8 @@ describe('awaitSessionStart', () => {
       pollMs: 10,
     });
     expect(result.started).toBe(true);
-    expect(result.failureMessage).toBeUndefined();
+    // The discriminated union guarantees no failureMessage on success.
+    expect('failureMessage' in result).toBe(false);
     // No teardown on success.
     expect(calls.killSession).toHaveLength(0);
     expect(existsSync(metaPath(workerDir, SID))).toBe(true);
@@ -149,6 +150,7 @@ describe('awaitSessionStart', () => {
       pollMs: 10,
     });
     expect(result.started).toBe(false);
+    if (result.started) throw new Error('expected timeout failure');
     expect(result.failureMessage).toContain(
       'Error: Worker session failed to start within 30 seconds',
     );

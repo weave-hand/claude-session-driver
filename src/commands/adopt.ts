@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { hasConsent } from '../core/consent.js';
 import { ensureBackCompatSymlink, eventsPath } from '../core/paths.js';
+import { isoSecondsUtc } from '../core/time.js';
 import { writeMeta, writeShim } from '../core/worker-store.js';
 import { getDriver } from '../harness/registry.js';
 import { awaitSessionStart } from './await-start.js';
@@ -76,7 +77,7 @@ export async function cmdAdopt(
     session_id: sessionId,
     cwd,
     harness: driver.id,
-    started_at: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+    started_at: isoSecondsUtc(),
     invocation,
   });
 

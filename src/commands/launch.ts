@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { hasConsent } from '../core/consent.js';
 import { ensureBackCompatSymlink, eventsPath } from '../core/paths.js';
+import { isoSecondsUtc } from '../core/time.js';
 import { writeMeta, writeShim } from '../core/worker-store.js';
 import type { HarnessId } from '../harness/driver.js';
 import { getDriver } from '../harness/registry.js';
@@ -123,6 +124,24 @@ export async function cmdLaunch(
   mkdirSync(join(ctx.workerDir, 'bin'), { recursive: true });
   ensureBackCompatSymlink(ctx.workerDir);
 
+  const invocation =
+    extraArgs.length > 0
+      ? [tmuxName, cwd, '--', ...extraArgs]
+      : [tmuxName, cwd];
+
+  // Pre-write the meta keyed by sessionId so the SessionStart hook can record
+  // events the moment the worker starts. The hook only appends events once a
+  // meta exists, so awaiting session_start would deadlock if the meta were
+  // written after the worker (and the timeout teardown removes it).
+  writeMeta(ctx.workerDir, {
+    tmux_name: tmuxName,
+    session_id: sessionId,
+    cwd,
+    harness: driver.id,
+    started_at: isoSecondsUtc(),
+    invocation,
+  });
+
   const env = driver.workerEnv(process.env);
   await driver.prepare(tmuxName, cwd, ctx.home);
 
@@ -138,20 +157,6 @@ export async function cmdLaunch(
   if (!proof.started) {
     return { stderr: proof.failureMessage, code: 1 };
   }
-
-  const invocation =
-    extraArgs.length > 0
-      ? [tmuxName, cwd, '--', ...extraArgs]
-      : [tmuxName, cwd];
-
-  writeMeta(ctx.workerDir, {
-    tmux_name: tmuxName,
-    session_id: sessionId,
-    cwd,
-    harness: driver.id,
-    started_at: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
-    invocation,
-  });
 
   const shim = writeShim(ctx.workerDir, tmuxName, opts.csdEntry);
   const panel = renderPanel({

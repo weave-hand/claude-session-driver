@@ -10,6 +10,7 @@ import { eventsPath, shimPath } from '../src/core/paths.js';
 import type { Tmux } from '../src/core/tmux.js';
 import { readMeta } from '../src/core/worker-store.js';
 import { getDriver } from '../src/harness/registry.js';
+import { runHook } from '../src/hooks/emit-event.js';
 
 function tmpDir(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
@@ -229,6 +230,42 @@ describe('cmdLaunch', () => {
     // Shim file exists and is executable.
     const mode = statSync(shimPath(workerDir, 'w1')).mode;
     expect(mode & 0o100).toBeTruthy();
+  });
+
+  it('writes the meta BEFORE the worker starts, so the real hook records session_start', async () => {
+    // This drives the REAL emit-event hook instead of appending the event
+    // directly. The hook only records session_start once a `<sid>.meta` exists,
+    // so launch can only succeed if it wrote the meta BEFORE the worker ran.
+    // (Revert the meta-before-launch ordering in cmdLaunch and this times out.)
+    grantConsent(home);
+    const state = freshState();
+    const ctx = makeCtx(
+      workerDir,
+      home,
+      fakeTmux(state, () => {
+        // The real claude worker receives its session id via `--session-id`;
+        // mirror that by parsing it from the argv and feeding the real hook.
+        const argv = state.newSession.at(-1)?.argv ?? [];
+        const sid = argv[argv.indexOf('--session-id') + 1] as string;
+        runHook({
+          stdin: JSON.stringify({
+            session_id: sid,
+            hook_event_name: 'SessionStart',
+            cwd,
+          }),
+          workerDir,
+          now: () => '2025-01-01T00:00:00Z',
+        });
+      }),
+    );
+    const result = await cmdLaunch(
+      ctx,
+      { tmuxName: 'w1', cwd, extraArgs: [], harness: 'claude' },
+      { ...baseOpts(), ...FAST },
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe(shimPath(workerDir, 'w1'));
   });
 
   it('fails and tears down when proof-of-life never arrives', async () => {

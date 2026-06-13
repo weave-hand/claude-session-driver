@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { appendEvent } from '../core/event-log.js';
 import { eventsPath, metaPath, workerDir } from '../core/paths.js';
+import { isoSecondsUtc } from '../core/time.js';
 import type { EventName, WorkerEvent } from '../events.js';
 
 /**
@@ -39,11 +40,6 @@ const EVENT_MAP: Record<string, EventName> = {
   PreToolUse: 'pre_tool_use',
   PostToolUse: 'post_tool_use',
 };
-
-/** A second-precision UTC ISO-8601 timestamp, e.g. `2026-06-13T13:40:27Z`. */
-export function isoSecondsUtc(date = new Date()): string {
-  return date.toISOString().replace(/\.\d{3}Z$/, 'Z');
-}
 
 function asRecord(v: unknown): Record<string, unknown> | null {
   return typeof v === 'object' && v !== null

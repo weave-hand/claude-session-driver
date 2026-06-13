@@ -20,7 +20,6 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // src/hooks/emit-event.ts
 var emit_event_exports = {};
 __export(emit_event_exports, {
-  isoSecondsUtc: () => isoSecondsUtc,
   runHook: () => runHook
 });
 module.exports = __toCommonJS(emit_event_exports);
@@ -53,6 +52,11 @@ function metaPath(dir, sid) {
   return `${dir}/${sid}.meta`;
 }
 
+// src/core/time.ts
+function isoSecondsUtc(date = /* @__PURE__ */ new Date()) {
+  return date.toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
 // src/hooks/emit-event.ts
 var EVENT_MAP = {
   SessionStart: "session_start",
@@ -62,9 +66,6 @@ var EVENT_MAP = {
   PreToolUse: "pre_tool_use",
   PostToolUse: "post_tool_use"
 };
-function isoSecondsUtc(date = /* @__PURE__ */ new Date()) {
-  return date.toISOString().replace(/\.\d{3}Z$/, "Z");
-}
 function asRecord(v) {
   return typeof v === "object" && v !== null ? v : null;
 }
@@ -151,6 +152,5 @@ if (typeof require !== "undefined" && typeof module !== "undefined" && require.m
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
-  isoSecondsUtc,
   runHook
 });

@@ -23,7 +23,7 @@ __export(emit_event_exports, {
   runHook: () => runHook
 });
 module.exports = __toCommonJS(emit_event_exports);
-var import_node_fs3 = require("fs");
+var import_node_fs4 = require("fs");
 
 // src/core/event-log.ts
 var import_node_fs = require("fs");
@@ -57,6 +57,14 @@ function isoSecondsUtc(date = /* @__PURE__ */ new Date()) {
   return date.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
+// src/core/worker-store.ts
+var import_node_fs3 = require("fs");
+var import_node_path = require("path");
+function writeMeta(dir, meta) {
+  (0, import_node_fs3.mkdirSync)(dir, { recursive: true });
+  (0, import_node_fs3.writeFileSync)(metaPath(dir, meta.session_id), JSON.stringify(meta));
+}
+
 // src/hooks/emit-event.ts
 var EVENT_MAP = {
   SessionStart: "session_start",
@@ -84,7 +92,17 @@ function runHook(opts) {
   if (payload === null) return empty;
   const sessionId = payload.session_id;
   if (typeof sessionId !== "string" || sessionId.length === 0) return empty;
-  if (!(0, import_node_fs3.existsSync)(metaPath(opts.workerDir, sessionId))) return empty;
+  if (opts.baked !== void 0 && !(0, import_node_fs4.existsSync)(metaPath(opts.workerDir, sessionId))) {
+    const transcriptPath = asString(payload.transcript_path);
+    writeMeta(opts.workerDir, {
+      tmux_name: opts.baked.tmuxName,
+      session_id: sessionId,
+      cwd: opts.baked.cwd,
+      harness: "codex",
+      ...transcriptPath.length > 0 ? { transcript_path: transcriptPath } : {}
+    });
+  }
+  if (!(0, import_node_fs4.existsSync)(metaPath(opts.workerDir, sessionId))) return empty;
   const hookEventName = asString(payload.hook_event_name);
   const event = EVENT_MAP[hookEventName];
   if (event === void 0) return empty;
@@ -136,10 +154,22 @@ function readStdin(timeoutMs = 5e3) {
 }
 async function main() {
   const stdin = await readStdin();
+  const args = process.argv.slice(2);
+  let baked;
+  let dir = workerDir();
+  if (args.length >= 3) {
+    const [tmuxName = "", cwd = "", bakedWorkerDir = ""] = args;
+    if (bakedWorkerDir.length === 0) {
+      process.exit(0);
+    }
+    baked = { tmuxName, cwd };
+    dir = bakedWorkerDir;
+  }
   const result = runHook({
     stdin,
-    workerDir: workerDir(),
-    now: () => isoSecondsUtc()
+    workerDir: dir,
+    now: () => isoSecondsUtc(),
+    baked
   });
   if (result.stdout.length > 0) {
     process.stdout.write(`${result.stdout}

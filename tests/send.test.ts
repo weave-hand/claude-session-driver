@@ -231,3 +231,124 @@ describe('cmdSend', () => {
     expect(result.stderr).toContain('ghost');
   });
 });
+
+const CODEX_SID = 'codex-sid';
+const CODEX_TMUX = 'codex-worker';
+
+function makeCodexCtx(workerDir: string, tmux: Tmux): CommandContext {
+  return {
+    workerDir,
+    home: workerDir,
+    tmux,
+    driver: getDriver('codex'),
+  };
+}
+
+describe('cmdSend — codex derive-id pre-registration', () => {
+  let workerDir: string;
+
+  beforeEach(() => {
+    // No meta is written: a derive worker has none until codex's first event.
+    workerDir = tmpDir();
+  });
+
+  afterEach(() => {
+    rmSync(workerDir, { recursive: true });
+  });
+
+  it('targets tmux by name, polls for the self-registered meta, then confirms (code 0)', async () => {
+    const calls: FakeTmuxCalls = { sendText: [], sendEnter: [] };
+    // Simulate codex: on the first paste+Enter, it fires SessionStart (the hook
+    // self-registers the meta keyed by sid, tmux_name === worker) and then a
+    // user_prompt_submit (so the confirmation loop succeeds).
+    const ef = eventsPath(workerDir, CODEX_SID);
+    const tmux = fakeTmux(true, calls, () => {
+      writeMeta(workerDir, {
+        tmux_name: CODEX_TMUX,
+        session_id: CODEX_SID,
+        cwd: '/proj',
+        harness: 'codex',
+        transcript_path: '/rollouts/codex-sid.jsonl',
+      });
+      appendEvent(ef, {
+        event: 'user_prompt_submit',
+        ts: '2025-01-01T00:00:01Z',
+      });
+    });
+    const ctx = makeCodexCtx(workerDir, tmux);
+    const result = await cmdSend(ctx, CODEX_TMUX, 'do the thing', {
+      submitTimeout: 5,
+      retryInterval: 2,
+      pollMs: 10,
+      registerTimeout: 5,
+      registerPollMs: 10,
+    });
+    expect(result.code).toBe(0);
+    // Paste was targeted at the tmux NAME (the only thing csd knew up front).
+    expect(calls.sendText).toEqual([
+      { name: CODEX_TMUX, text: `${PASTE_START}do the thing${PASTE_END}` },
+    ]);
+    expect(calls.sendEnter).toContain(CODEX_TMUX);
+  });
+
+  it('returns code 1 when the tmux session does not exist', async () => {
+    const calls: FakeTmuxCalls = { sendText: [], sendEnter: [] };
+    const ctx = makeCodexCtx(workerDir, fakeTmux(false, calls));
+    const result = await cmdSend(ctx, CODEX_TMUX, 'hi', {
+      registerTimeout: 1,
+      registerPollMs: 10,
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toBe(
+      `Error: tmux session '${CODEX_TMUX}' does not exist`,
+    );
+    expect(calls.sendText).toHaveLength(0);
+  });
+
+  it('times out with the registration error when codex never registers (code 1)', async () => {
+    const calls: FakeTmuxCalls = { sendText: [], sendEnter: [] };
+    // fake tmux never registers a meta — codex did not emit SessionStart.
+    const ctx = makeCodexCtx(workerDir, fakeTmux(true, calls));
+    const result = await cmdSend(ctx, CODEX_TMUX, 'hi', {
+      registerTimeout: 0.1,
+      registerPollMs: 10,
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toBe(
+      `Error: worker '${CODEX_TMUX}' did not register within 0.1s (codex did not emit SessionStart)`,
+    );
+  });
+
+  it('takes the normal path (no register wait) when the meta already exists', async () => {
+    // A subsequent send: the derive worker is already registered.
+    writeMeta(workerDir, {
+      tmux_name: CODEX_TMUX,
+      session_id: CODEX_SID,
+      cwd: '/proj',
+      harness: 'codex',
+    });
+    const ef = eventsPath(workerDir, CODEX_SID);
+    appendEvent(ef, { event: 'session_start', ts: '2025-01-01T00:00:00Z' });
+    const calls: FakeTmuxCalls = { sendText: [], sendEnter: [] };
+    const tmux = fakeTmux(true, calls, () => {
+      appendEvent(ef, {
+        event: 'user_prompt_submit',
+        ts: '2025-01-01T00:00:01Z',
+      });
+    });
+    const ctx = makeCodexCtx(workerDir, tmux);
+    // registerTimeout is tiny: if the code wrongly entered the register window
+    // with the meta already present, it must NOT block on it.
+    const result = await cmdSend(ctx, CODEX_TMUX, 'again', {
+      submitTimeout: 5,
+      retryInterval: 2,
+      pollMs: 10,
+      registerTimeout: 0.1,
+      registerPollMs: 10,
+    });
+    expect(result.code).toBe(0);
+    expect(calls.sendText).toEqual([
+      { name: CODEX_TMUX, text: `${PASTE_START}again${PASTE_END}` },
+    ]);
+  });
+});

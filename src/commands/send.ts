@@ -1,5 +1,6 @@
 import { readRawLines } from '../core/event-log.js';
 import { eventsPath } from '../core/paths.js';
+import { resolveSession } from '../core/worker-store.js';
 import { parseEvent } from '../events.js';
 import type { CommandContext, CommandResult } from './context.js';
 import { resolveWorker } from './context.js';
@@ -26,6 +27,14 @@ export interface SendOpts {
   retryInterval?: number;
   /** Poll interval in ms (default 250). Small values keep tests fast. */
   pollMs?: number;
+  /**
+   * Pre-registration window timeout in SECONDS (default 15, honours
+   * CSD_REGISTER_TIMEOUT). Only used on the first send to a derive worker
+   * (codex), while polling for the hook-self-registered `<sid>.meta` to appear.
+   */
+  registerTimeout?: number;
+  /** Poll interval in ms while waiting for the meta (default 250). */
+  registerPollMs?: number;
 }
 
 /**
@@ -60,6 +69,19 @@ export async function cmdSend(
   prompt: string,
   opts: SendOpts = {},
 ): Promise<CommandResult> {
+  // Codex (derive) on the FIRST send: csd does not yet know the session id
+  // (codex mints it on the first prompt) and so no `<sid>.meta` exists. The
+  // paste itself triggers codex's SessionStart, whose hook self-registers the
+  // meta; we then poll for it to learn the sid. The claude (assign) path, and
+  // every subsequent send to an already-registered derive worker, take the
+  // normal resolve-then-send path.
+  if (
+    ctx.driver.idStrategy === 'derive' &&
+    resolveSession(ctx.workerDir, worker) === null
+  ) {
+    return sendDeriveFirst(ctx, worker, prompt, opts);
+  }
+
   const resolved = resolveWorker(ctx, worker);
   if ('code' in resolved) return resolved;
   const { sid, meta } = resolved;
@@ -72,21 +94,106 @@ export async function cmdSend(
     };
   }
 
+  const eventFile = eventsPath(ctx.workerDir, sid);
+  const beforeLine = readRawLines(eventFile).length;
+  await pasteText(ctx, tmuxName, prompt);
+  return confirmSubmission(ctx, tmuxName, eventFile, beforeLine, opts);
+}
+
+/**
+ * The first send to a not-yet-registered derive worker (codex). `worker` is the
+ * tmux_name (csd has no sid yet). We paste targeting tmux BY NAME to provoke
+ * codex's SessionStart, poll for the hook-self-registered `<worker>.meta`, then
+ * run the normal submission-confirm loop once the sid is known.
+ */
+async function sendDeriveFirst(
+  ctx: CommandContext,
+  worker: string,
+  prompt: string,
+  opts: SendOpts,
+): Promise<CommandResult> {
+  if (!(await ctx.tmux.hasSession(worker))) {
+    return {
+      stderr: `Error: tmux session '${worker}' does not exist`,
+      code: 1,
+    };
+  }
+
+  const registerTimeout =
+    opts.registerTimeout ?? envNumber('CSD_REGISTER_TIMEOUT', 15);
+  const registerPollMs = opts.registerPollMs ?? 250;
+  const retryInterval =
+    opts.retryInterval ?? envNumber('CSD_SUBMIT_RETRY_INTERVAL', 2);
+
+  // Paste + Enter to provoke codex's first prompt: codex fires SessionStart (the
+  // hook self-registers the meta) and accepts the prompt. There is no events
+  // file yet, so the confirm loop will start from line 0. Re-send Enter on the
+  // retry interval while polling, since an Enter sent before codex finished
+  // converting the paste can be swallowed (issue #20).
+  await pasteText(ctx, worker, prompt);
+  await ctx.tmux.sendEnter(worker);
+
+  const deadline = Date.now() + registerTimeout * 1000;
+  let sinceEnter = Date.now();
+  let sid = resolveSession(ctx.workerDir, worker);
+  while (sid === null) {
+    if (Date.now() >= deadline) {
+      return {
+        stderr: `Error: worker '${worker}' did not register within ${registerTimeout}s (codex did not emit SessionStart)`,
+        code: 1,
+      };
+    }
+    await sleep(registerPollMs);
+    if (Date.now() - sinceEnter >= retryInterval * 1000) {
+      await ctx.tmux.sendEnter(worker);
+      sinceEnter = Date.now();
+    }
+    sid = resolveSession(ctx.workerDir, worker);
+  }
+
+  return confirmSubmission(
+    ctx,
+    worker,
+    eventsPath(ctx.workerDir, sid),
+    0,
+    opts,
+  );
+}
+
+/**
+ * Send the prompt as one bracketed paste. Any embedded paste markers are
+ * stripped first so a hostile prompt cannot inject its own paste boundaries.
+ */
+async function pasteText(
+  ctx: CommandContext,
+  tmuxName: string,
+  prompt: string,
+): Promise<void> {
+  const safe = prompt.split(PASTE_END).join('').split(PASTE_START).join('');
+  await ctx.tmux.sendText(tmuxName, PASTE_START + safe + PASTE_END);
+}
+
+/**
+ * Send Enter and re-send it every `retryInterval` seconds until the worker emits
+ * `user_prompt_submit` after `beforeLine`, or `submitTimeout` elapses. Shared by
+ * the assign and derive paths.
+ *
+ * The harness converts the bracketed paste into a pending-input widget
+ * asynchronously; an Enter sent too early can be swallowed (issue #20).
+ */
+async function confirmSubmission(
+  ctx: CommandContext,
+  tmuxName: string,
+  eventFile: string,
+  beforeLine: number,
+  opts: SendOpts,
+): Promise<CommandResult> {
   const submitTimeout =
     opts.submitTimeout ?? envNumber('CSD_SUBMIT_TIMEOUT', 10);
   const retryInterval =
     opts.retryInterval ?? envNumber('CSD_SUBMIT_RETRY_INTERVAL', 2);
   const pollMs = opts.pollMs ?? 250;
 
-  const eventFile = eventsPath(ctx.workerDir, sid);
-  const beforeLine = readRawLines(eventFile).length;
-
-  const safe = prompt.split(PASTE_END).join('').split(PASTE_START).join('');
-  await ctx.tmux.sendText(tmuxName, PASTE_START + safe + PASTE_END);
-
-  // The harness converts the bracketed paste into a pending-input widget
-  // asynchronously; an Enter sent too early can be swallowed (issue #20).
-  // Re-send Enter until the worker confirms via user_prompt_submit or we time out.
   await ctx.tmux.sendEnter(tmuxName);
   const deadline = Date.now() + submitTimeout * 1000;
   let sinceEnter = Date.now();

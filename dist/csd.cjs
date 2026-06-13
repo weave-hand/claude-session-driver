@@ -1004,6 +1004,9 @@ function promptSubmittedSince(eventFile, beforeLine) {
   return lines.slice(beforeLine).some((line) => parseEvent(line)?.event === "user_prompt_submit");
 }
 async function cmdSend(ctx, worker, prompt, opts = {}) {
+  if (ctx.driver.idStrategy === "derive" && resolveSession(ctx.workerDir, worker) === null) {
+    return sendDeriveFirst(ctx, worker, prompt, opts);
+  }
   const resolved = resolveWorker(ctx, worker);
   if ("code" in resolved) return resolved;
   const { sid, meta } = resolved;
@@ -1014,13 +1017,56 @@ async function cmdSend(ctx, worker, prompt, opts = {}) {
       code: 1
     };
   }
+  const eventFile = eventsPath(ctx.workerDir, sid);
+  const beforeLine = readRawLines(eventFile).length;
+  await pasteText(ctx, tmuxName, prompt);
+  return confirmSubmission(ctx, tmuxName, eventFile, beforeLine, opts);
+}
+async function sendDeriveFirst(ctx, worker, prompt, opts) {
+  if (!await ctx.tmux.hasSession(worker)) {
+    return {
+      stderr: `Error: tmux session '${worker}' does not exist`,
+      code: 1
+    };
+  }
+  const registerTimeout = opts.registerTimeout ?? envNumber("CSD_REGISTER_TIMEOUT", 15);
+  const registerPollMs = opts.registerPollMs ?? 250;
+  const retryInterval = opts.retryInterval ?? envNumber("CSD_SUBMIT_RETRY_INTERVAL", 2);
+  await pasteText(ctx, worker, prompt);
+  await ctx.tmux.sendEnter(worker);
+  const deadline = Date.now() + registerTimeout * 1e3;
+  let sinceEnter = Date.now();
+  let sid = resolveSession(ctx.workerDir, worker);
+  while (sid === null) {
+    if (Date.now() >= deadline) {
+      return {
+        stderr: `Error: worker '${worker}' did not register within ${registerTimeout}s (codex did not emit SessionStart)`,
+        code: 1
+      };
+    }
+    await sleep2(registerPollMs);
+    if (Date.now() - sinceEnter >= retryInterval * 1e3) {
+      await ctx.tmux.sendEnter(worker);
+      sinceEnter = Date.now();
+    }
+    sid = resolveSession(ctx.workerDir, worker);
+  }
+  return confirmSubmission(
+    ctx,
+    worker,
+    eventsPath(ctx.workerDir, sid),
+    0,
+    opts
+  );
+}
+async function pasteText(ctx, tmuxName, prompt) {
+  const safe = prompt.split(PASTE_END).join("").split(PASTE_START).join("");
+  await ctx.tmux.sendText(tmuxName, PASTE_START + safe + PASTE_END);
+}
+async function confirmSubmission(ctx, tmuxName, eventFile, beforeLine, opts) {
   const submitTimeout = opts.submitTimeout ?? envNumber("CSD_SUBMIT_TIMEOUT", 10);
   const retryInterval = opts.retryInterval ?? envNumber("CSD_SUBMIT_RETRY_INTERVAL", 2);
   const pollMs = opts.pollMs ?? 250;
-  const eventFile = eventsPath(ctx.workerDir, sid);
-  const beforeLine = readRawLines(eventFile).length;
-  const safe = prompt.split(PASTE_END).join("").split(PASTE_START).join("");
-  await ctx.tmux.sendText(tmuxName, PASTE_START + safe + PASTE_END);
   await ctx.tmux.sendEnter(tmuxName);
   const deadline = Date.now() + submitTimeout * 1e3;
   let sinceEnter = Date.now();

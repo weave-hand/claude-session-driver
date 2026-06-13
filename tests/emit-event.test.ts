@@ -1,9 +1,10 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { readEvents } from '../src/core/event-log.js';
 import { eventsPath, metaPath } from '../src/core/paths.js';
+import { readMeta } from '../src/core/worker-store.js';
 import { runHook } from '../src/hooks/emit-event.js';
 
 function tmpDir(): string {
@@ -262,5 +263,124 @@ describe('runHook — no-op cases', () => {
     });
     const result = run(stdin, dir);
     expect(result).toEqual({ stdout: '' });
+  });
+});
+
+describe('runHook — codex meta self-registration (baked args)', () => {
+  const baked = { tmuxName: 'codex-worker', cwd: '/proj' };
+
+  function runBaked(stdin: string, dir: string) {
+    return runHook({ stdin, workerDir: dir, now: fixedNow, baked });
+  }
+
+  it('self-registers <sid>.meta and appends the event on first SessionStart', () => {
+    const dir = tmpDir();
+    // no pre-existing meta — codex mints its own id
+    const stdin = JSON.stringify({
+      session_id: SID,
+      hook_event_name: 'SessionStart',
+      cwd: '/proj',
+      transcript_path: '/rollouts/S.jsonl',
+    });
+    const result = runBaked(stdin, dir);
+
+    // meta self-registered from the payload + baked args
+    expect(readMeta(dir, SID)).toEqual({
+      tmux_name: 'codex-worker',
+      session_id: SID,
+      cwd: '/proj',
+      harness: 'codex',
+      transcript_path: '/rollouts/S.jsonl',
+    });
+    // the triggering event is itself recorded
+    expect(result.appended).toEqual({
+      event: 'session_start',
+      ts: 'T',
+      cwd: '/proj',
+    });
+    expect(readEvents(eventsPath(dir, SID))).toEqual([
+      { event: 'session_start', ts: 'T', cwd: '/proj' },
+    ]);
+  });
+
+  it('omits transcript_path from the meta when the payload has none', () => {
+    const dir = tmpDir();
+    const stdin = JSON.stringify({
+      session_id: SID,
+      hook_event_name: 'SessionStart',
+      cwd: '/proj',
+    });
+    runBaked(stdin, dir);
+    const meta = readMeta(dir, SID);
+    expect(meta).not.toBeNull();
+    expect(meta).not.toHaveProperty('transcript_path');
+  });
+
+  it('does not overwrite an existing meta on a later event, still appends', () => {
+    const dir = tmpDir();
+    // First event self-registers with the original transcript_path.
+    runBaked(
+      JSON.stringify({
+        session_id: SID,
+        hook_event_name: 'SessionStart',
+        cwd: '/proj',
+        transcript_path: '/rollouts/S.jsonl',
+      }),
+      dir,
+    );
+    // A second event arrives carrying a DIFFERENT transcript_path; the meta
+    // must stay as first written.
+    const result = runBaked(
+      JSON.stringify({
+        session_id: SID,
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Bash',
+        tool_input: { cmd: 'ls' },
+        transcript_path: '/rollouts/OTHER.jsonl',
+      }),
+      dir,
+    );
+    expect(readMeta(dir, SID)?.transcript_path).toBe('/rollouts/S.jsonl');
+    expect(result.appended).toEqual({
+      event: 'pre_tool_use',
+      ts: 'T',
+      tool: 'Bash',
+      tool_input: { cmd: 'ls' },
+    });
+    expect(readEvents(eventsPath(dir, SID))).toEqual([
+      { event: 'session_start', ts: 'T', cwd: '/proj' },
+      {
+        event: 'pre_tool_use',
+        ts: 'T',
+        tool: 'Bash',
+        tool_input: { cmd: 'ls' },
+      },
+    ]);
+  });
+
+  it('without baked args, no meta → still no-ops (claude path unchanged)', () => {
+    const dir = tmpDir();
+    const stdin = JSON.stringify({
+      session_id: SID,
+      hook_event_name: 'SessionStart',
+      cwd: '/proj',
+      transcript_path: '/rollouts/S.jsonl',
+    });
+    const result = run(stdin, dir);
+    expect(result).toEqual({ stdout: '' });
+    expect(existsSync(metaPath(dir, SID))).toBe(false);
+    expect(readEvents(eventsPath(dir, SID))).toEqual([]);
+  });
+
+  it('does not self-register when session_id is missing', () => {
+    const dir = tmpDir();
+    const stdin = JSON.stringify({
+      hook_event_name: 'SessionStart',
+      cwd: '/proj',
+    });
+    const result = runBaked(stdin, dir);
+    expect(result).toEqual({ stdout: '' });
+    // No meta should be written without a session_id to key it.
+    expect(existsSync(metaPath(dir, SID))).toBe(false);
   });
 });

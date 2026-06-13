@@ -1,0 +1,43 @@
+import { existsSync, symlinkSync } from 'node:fs';
+
+const DEFAULT_WORKER_DIR = '/tmp/csd-workers';
+const BACK_COMPAT_LINK = '/tmp/claude-workers';
+
+export function workerDir(): string {
+  return process.env.CSD_WORKER_DIR ?? DEFAULT_WORKER_DIR;
+}
+
+export function eventsPath(dir: string, sid: string): string {
+  return `${dir}/${sid}.events.jsonl`;
+}
+
+export function metaPath(dir: string, sid: string): string {
+  return `${dir}/${sid}.meta`;
+}
+
+export function shimPath(dir: string, name: string): string {
+  return `${dir}/bin/${name}`;
+}
+
+export function claudeTranscriptPath(
+  home: string,
+  cwd: string,
+  sid: string,
+): string {
+  return `${home}/.claude/projects/${cwd.replaceAll('/', '-')}/${sid}.jsonl`;
+}
+
+/**
+ * Creates a back-compat symlink /tmp/claude-workers → /tmp/csd-workers when
+ * using the default worker dir. Best-effort: errors are silently swallowed so
+ * a failure here never crashes the caller.
+ */
+export function ensureBackCompatSymlink(dir: string): void {
+  if (dir !== DEFAULT_WORKER_DIR) return;
+  if (existsSync(BACK_COMPAT_LINK)) return;
+  try {
+    symlinkSync(DEFAULT_WORKER_DIR, BACK_COMPAT_LINK);
+  } catch {
+    // best-effort; a failure must not crash
+  }
+}

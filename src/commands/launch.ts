@@ -3,24 +3,12 @@ import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { hasConsent } from '../core/consent.js';
 import { ensureBackCompatSymlink, eventsPath } from '../core/paths.js';
+import { shellQuote } from '../core/shell.js';
 import { isoSecondsUtc } from '../core/time.js';
 import { writeMeta, writeShim } from '../core/worker-store.js';
 import { getDriver } from '../harness/registry.js';
 import { awaitSessionStart } from './await-start.js';
 import type { CommandContext, CommandResult } from './context.js';
-
-/**
- * Shell-quote a single token for the reproduce line. A simplified port of
- * bash `printf %q`: tokens of only safe characters pass through unquoted;
- * anything else is wrapped in single quotes (with embedded single quotes
- * escaped the `'\''` way). The goal is a copy-pasteable command, not byte
- * parity with %q.
- */
-export function shellQuote(token: string): string {
-  if (token === '') return "''";
-  if (/^[A-Za-z0-9_./:=@-]+$/.test(token)) return token;
-  return `'${token.replaceAll("'", "'\\''")}'`;
-}
 
 /** The shared bootstrap options launch and adopt both accept. */
 export interface BootstrapOpts {

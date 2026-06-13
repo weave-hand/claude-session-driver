@@ -24,6 +24,7 @@ import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { workerDir } from '../core/paths.js';
+import { shellQuoteAlways } from '../core/shell.js';
 import { type NormalizedTurn, parseCodexTurn } from '../core/transcript.js';
 import { readMeta } from '../core/worker-store.js';
 import type { HarnessDriver, LaunchMode } from './driver.js';
@@ -85,17 +86,6 @@ function tomlBasicString(value: string): string {
 }
 
 /**
- * Shell-quote a token for the hook `command` string, which codex executes via a
- * shell. Single-quote-wrap (POSIX: nothing inside single quotes is special)
- * with the `'\''` trick for embedded single quotes. This survives spaces, double
- * quotes, and backslashes in the baked args; the whole command is then
- * TOML-escaped by `tomlBasicString`, so spaces/quotes round-trip both layers.
- */
-function shellQuote(token: string): string {
-  return `'${token.replaceAll("'", "'\\''")}'`;
-}
-
-/**
  * The absolute path to the bundled `emit-event.cjs`. Injectable via
  * `CSD_EMIT_EVENT_PATH` (tests set it); otherwise it sits next to the running
  * `csd.cjs` bundle (tsup emits both into `dist/`), so `__dirname` is `dist/`.
@@ -124,6 +114,8 @@ export function buildCodexConfig(opts: {
   const { cwd, model, hookCommand } = opts;
   const lines: string[] = [
     `model = ${tomlBasicString(model)}`,
+    // Hardcoded safe literal — no user input, no escaping needed (unlike `model`
+    // and `cwd` which go through tomlBasicString because they come from the user).
     'model_reasoning_effort = "low"',
     `[projects.${tomlBasicString(cwd)}]`,
     'trust_level = "trusted"',
@@ -192,10 +184,10 @@ export const codex: HarnessDriver = {
 
     const hookCommand = [
       'node',
-      shellQuote(emitEventPath()),
-      shellQuote(tmuxName),
-      shellQuote(cwd),
-      shellQuote(workerDir()),
+      shellQuoteAlways(emitEventPath()),
+      shellQuoteAlways(tmuxName),
+      shellQuoteAlways(cwd),
+      shellQuoteAlways(workerDir()),
     ].join(' ');
 
     const config = buildCodexConfig({

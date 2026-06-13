@@ -400,6 +400,18 @@ var claude = {
 var import_node_fs4 = require("fs");
 var import_node_os = require("os");
 var import_node_path3 = require("path");
+
+// src/core/shell.ts
+function shellQuote(token) {
+  if (token === "") return "''";
+  if (/^[A-Za-z0-9_./:=@-]+$/.test(token)) return token;
+  return `'${token.replaceAll("'", "'\\''")}'`;
+}
+function shellQuoteAlways(token) {
+  return `'${token.replaceAll("'", "'\\''")}'`;
+}
+
+// src/harness/codex.ts
 var CODEX_HOOK_EVENTS = [
   "SessionStart",
   "UserPromptSubmit",
@@ -446,9 +458,6 @@ function tomlBasicString(value) {
   }
   return `${out}"`;
 }
-function shellQuote(token) {
-  return `'${token.replaceAll("'", "'\\''")}'`;
-}
 function emitEventPath() {
   const override = process.env.CSD_EMIT_EVENT_PATH;
   if (override) return override;
@@ -461,6 +470,8 @@ function buildCodexConfig(opts) {
   const { cwd, model, hookCommand } = opts;
   const lines = [
     `model = ${tomlBasicString(model)}`,
+    // Hardcoded safe literal — no user input, no escaping needed (unlike `model`
+    // and `cwd` which go through tomlBasicString because they come from the user).
     'model_reasoning_effort = "low"',
     `[projects.${tomlBasicString(cwd)}]`,
     'trust_level = "trusted"'
@@ -509,10 +520,10 @@ var codex = {
     }
     const hookCommand = [
       "node",
-      shellQuote(emitEventPath()),
-      shellQuote(tmuxName),
-      shellQuote(cwd),
-      shellQuote(workerDir())
+      shellQuoteAlways(emitEventPath()),
+      shellQuoteAlways(tmuxName),
+      shellQuoteAlways(cwd),
+      shellQuoteAlways(workerDir())
     ].join(" ");
     const config = buildCodexConfig({
       cwd,
@@ -673,11 +684,6 @@ async function awaitSessionStart(ctx, tmuxName, sessionId, opts = {}) {
 var import_node_crypto = require("crypto");
 var import_node_fs6 = require("fs");
 var import_node_path4 = require("path");
-function shellQuote2(token) {
-  if (token === "") return "''";
-  if (/^[A-Za-z0-9_./:=@-]+$/.test(token)) return token;
-  return `'${token.replaceAll("'", "'\\''")}'`;
-}
 function consentError(csdPath) {
   return {
     stderr: `Error: claude-session-driver requires one-time consent before launching workers.
@@ -692,14 +698,14 @@ function resolveCwd(cwd) {
   return (0, import_node_fs6.realpathSync)(cwd);
 }
 function renderPanel(opts) {
-  const reproduceArgs = opts.invocation.map(shellQuote2).join(" ");
+  const reproduceArgs = opts.invocation.map(shellQuote).join(" ");
   return [
     opts.header,
     `  tmux:       ${opts.tmuxName}`,
     `  session_id: ${opts.sessionId}`,
     `  cwd:        ${opts.cwd}`,
     `  events:     ${opts.eventsFile}`,
-    `  reproduce: ${shellQuote2(opts.csdPath)} ${opts.verb} ${reproduceArgs}`
+    `  reproduce: ${shellQuote(opts.csdPath)} ${opts.verb} ${reproduceArgs}`
   ].join("\n");
 }
 async function cmdLaunch(ctx, args, opts) {

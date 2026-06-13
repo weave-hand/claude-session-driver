@@ -183,6 +183,8 @@ function parseRolloutLines(jsonl: string): RolloutLine[] {
     if (line.length === 0) continue;
     try {
       const parsed: unknown = JSON.parse(line);
+      // Codex rollout JSONL can contain bare scalars; the object guard prevents
+      // treating them as line objects (unlike Claude transcripts which are always objects).
       if (typeof parsed === 'object' && parsed !== null) {
         out.push(parsed as RolloutLine);
       }

@@ -63,6 +63,9 @@ function metaPath(dir, sid) {
 function shimPath(dir, name) {
   return `${dir}/bin/${name}`;
 }
+function harnessMarkerPath(dir, name) {
+  return `${dir}/${name}.harness`;
+}
 function claudeTranscriptPath(home, cwd, sid) {
   return `${home}/.claude/projects/${cwd.replaceAll("/", "-")}/${sid}.jsonl`;
 }
@@ -121,10 +124,24 @@ exec node "${csdEntry}" --worker "${name}" "$@"
   (0, import_node_fs3.chmodSync)(p, 493);
   return p;
 }
+function writeHarnessMarker(dir, name, harness) {
+  (0, import_node_fs3.mkdirSync)(dir, { recursive: true });
+  (0, import_node_fs3.writeFileSync)(harnessMarkerPath(dir, name), harness);
+}
+function readHarnessMarker(dir, name) {
+  const p = harnessMarkerPath(dir, name);
+  if (!(0, import_node_fs3.existsSync)(p)) return null;
+  try {
+    return (0, import_node_fs3.readFileSync)(p, "utf8").trim() || null;
+  } catch {
+    return null;
+  }
+}
 function removeWorker(dir, sid, name) {
   (0, import_node_fs3.rmSync)(metaPath(dir, sid), { force: true });
   (0, import_node_fs3.rmSync)(eventsPath(dir, sid), { force: true });
   (0, import_node_fs3.rmSync)(shimPath(dir, name), { force: true });
+  (0, import_node_fs3.rmSync)(harnessMarkerPath(dir, name), { force: true });
 }
 
 // src/core/transcript.ts
@@ -684,6 +701,51 @@ async function awaitSessionStart(ctx, tmuxName, sessionId, opts = {}) {
 var import_node_crypto = require("crypto");
 var import_node_fs6 = require("fs");
 var import_node_path4 = require("path");
+
+// src/commands/codex-launch.ts
+var sleep2 = (ms) => new Promise((r) => setTimeout(r, ms));
+var DEFAULT_TRUST_TIMEOUT_MS2 = 8e3;
+var DEFAULT_TRUST_POLL_MS = 250;
+var DEFAULT_TRUST_SETTLE_MS = 300;
+var DEFAULT_READY_TIMEOUT_MS = 2e4;
+var DEFAULT_READY_POLL_MS = 500;
+var COMPOSER_GLYPH = "\u203A";
+var TRUST_GATE = /hooks need review|trust all and continue|trust all/i;
+async function dismissCodexTrustGate(ctx, tmuxName, opts = {}) {
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TRUST_TIMEOUT_MS2;
+  const pollMs = opts.pollMs ?? DEFAULT_TRUST_POLL_MS;
+  const settleMs = opts.settleMs ?? DEFAULT_TRUST_SETTLE_MS;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const pane = await capture(ctx, tmuxName);
+    if (TRUST_GATE.test(pane)) {
+      await ctx.tmux.sendText(tmuxName, "2");
+      await sleep2(settleMs);
+      await ctx.tmux.sendEnter(tmuxName);
+      return;
+    }
+    await sleep2(pollMs);
+  }
+}
+async function awaitComposerReady(ctx, tmuxName, opts = {}) {
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_READY_TIMEOUT_MS;
+  const pollMs = opts.pollMs ?? DEFAULT_READY_POLL_MS;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const pane = await capture(ctx, tmuxName);
+    if (pane.includes(COMPOSER_GLYPH)) return;
+    await sleep2(pollMs);
+  }
+}
+async function capture(ctx, tmuxName) {
+  try {
+    return await ctx.tmux.capturePane(tmuxName);
+  } catch {
+    return "";
+  }
+}
+
+// src/commands/launch.ts
 function consentError(csdPath) {
   return {
     stderr: `Error: claude-session-driver requires one-time consent before launching workers.
@@ -708,6 +770,9 @@ function renderPanel(opts) {
     `  reproduce: ${shellQuote(opts.csdPath)} ${opts.verb} ${reproduceArgs}`
   ].join("\n");
 }
+function deriveWorkerHome(workerDir2, tmuxName) {
+  return (0, import_node_path4.join)(workerDir2, "homes", tmuxName);
+}
 async function cmdLaunch(ctx, args, opts) {
   const { tmuxName, extraArgs } = args;
   const driver = getDriver(args.harness);
@@ -721,11 +786,14 @@ async function cmdLaunch(ctx, args, opts) {
       code: 1
     };
   }
-  const sessionId = (0, import_node_crypto.randomUUID)();
   (0, import_node_fs6.mkdirSync)(ctx.workerDir, { recursive: true });
   (0, import_node_fs6.mkdirSync)((0, import_node_path4.join)(ctx.workerDir, "bin"), { recursive: true });
   ensureBackCompatSymlink(ctx.workerDir);
   const invocation = extraArgs.length > 0 ? [tmuxName, cwd, "--", ...extraArgs] : [tmuxName, cwd];
+  return driver.idStrategy === "derive" ? launchDerive(ctx, { driver, tmuxName, cwd, extraArgs, invocation }, opts) : launchAssign(ctx, { driver, tmuxName, cwd, extraArgs, invocation }, opts);
+}
+async function launchAssign(ctx, { driver, tmuxName, cwd, extraArgs, invocation }, opts) {
+  const sessionId = (0, import_node_crypto.randomUUID)();
   writeMeta(ctx.workerDir, {
     tmux_name: tmuxName,
     session_id: sessionId,
@@ -754,6 +822,38 @@ async function cmdLaunch(ctx, args, opts) {
     sessionId,
     cwd,
     eventsFile: eventsPath(ctx.workerDir, sessionId),
+    csdPath: opts.csdPath,
+    invocation
+  });
+  return { stdout: shim, stderr: panel, code: 0 };
+}
+async function launchDerive(ctx, { driver, tmuxName, cwd, extraArgs, invocation }, opts) {
+  writeHarnessMarker(ctx.workerDir, tmuxName, driver.id);
+  const workerHome = deriveWorkerHome(ctx.workerDir, tmuxName);
+  const env = driver.workerEnv(workerHome, process.env);
+  await driver.prepare(tmuxName, cwd, workerHome);
+  const argv = [
+    ...driver.launchArgv("launch", "", cwd, opts.pluginDir, workerHome),
+    ...extraArgs
+  ];
+  await ctx.tmux.newSession(tmuxName, cwd, env, argv);
+  await dismissCodexTrustGate(ctx, tmuxName, {
+    timeoutMs: opts.codexTrustTimeoutMs,
+    settleMs: opts.codexTrustSettleMs,
+    pollMs: opts.pollMs
+  });
+  await awaitComposerReady(ctx, tmuxName, {
+    timeoutMs: opts.codexReadyTimeoutMs,
+    pollMs: opts.pollMs
+  });
+  const shim = writeShim(ctx.workerDir, tmuxName, opts.csdEntry);
+  const panel = renderPanel({
+    header: "Worker launched.",
+    verb: "launch",
+    tmuxName,
+    sessionId: "(derive \u2014 assigned on first prompt)",
+    cwd,
+    eventsFile: "(registered on first prompt)",
     csdPath: opts.csdPath,
     invocation
   });
@@ -991,7 +1091,7 @@ async function cmdReadTurn(ctx, worker, opts) {
 var ESC = "\x1B";
 var PASTE_START = `${ESC}[200~`;
 var PASTE_END = `${ESC}[201~`;
-var sleep2 = (ms) => new Promise((r) => setTimeout(r, ms));
+var sleep3 = (ms) => new Promise((r) => setTimeout(r, ms));
 function envNumber(name, dflt) {
   const raw = process.env[name];
   if (raw === void 0) return dflt;
@@ -1044,7 +1144,7 @@ async function sendDeriveFirst(ctx, worker, prompt, opts) {
         code: 1
       };
     }
-    await sleep2(registerPollMs);
+    await sleep3(registerPollMs);
     if (Date.now() - sinceEnter >= retryInterval * 1e3) {
       await ctx.tmux.sendEnter(worker);
       sinceEnter = Date.now();
@@ -1077,7 +1177,7 @@ async function confirmSubmission(ctx, tmuxName, eventFile, beforeLine, opts) {
         code: 1
       };
     }
-    await sleep2(pollMs);
+    await sleep3(pollMs);
     if (Date.now() - sinceEnter >= retryInterval * 1e3) {
       await ctx.tmux.sendEnter(tmuxName);
       sinceEnter = Date.now();
@@ -1088,7 +1188,7 @@ async function confirmSubmission(ctx, tmuxName, eventFile, beforeLine, opts) {
 
 // src/commands/wait-for-turn.ts
 var import_node_fs10 = require("fs");
-var sleep3 = (ms) => new Promise((r) => setTimeout(r, ms));
+var sleep4 = (ms) => new Promise((r) => setTimeout(r, ms));
 var isTurnEnd = (line) => {
   const e = parseEvent(line)?.event;
   return e === "stop" || e === "session_end";
@@ -1110,7 +1210,7 @@ async function cmdWaitForTurn(ctx, worker, opts) {
         code: 1
       };
     }
-    await sleep3(pollMs);
+    await sleep4(pollMs);
   }
   let linesChecked = afterLine;
   while (Date.now() < deadline) {
@@ -1122,7 +1222,7 @@ async function cmdWaitForTurn(ctx, worker, opts) {
       }
       linesChecked = lines.length;
     }
-    await sleep3(pollMs);
+    await sleep4(pollMs);
   }
   return {
     stderr: `Timeout waiting for turn (stop or session_end) after ${timeout}s`,
@@ -1131,7 +1231,7 @@ async function cmdWaitForTurn(ctx, worker, opts) {
 }
 
 // src/commands/converse.ts
-var sleep4 = (ms) => new Promise((r) => setTimeout(r, ms));
+var sleep5 = (ms) => new Promise((r) => setTimeout(r, ms));
 function readTranscript(file) {
   return (0, import_node_fs11.existsSync)(file) ? (0, import_node_fs11.readFileSync)(file, "utf8") : "";
 }
@@ -1200,7 +1300,7 @@ csd-diagnostic: ${diagDest}` : "";
         }
       }
     }
-    await sleep4(postPollMs);
+    await sleep5(postPollMs);
   }
   const diag = await dumpDiag("no_assistant_response");
   return {
@@ -1392,7 +1492,7 @@ async function cmdSessionId(ctx, worker) {
 }
 
 // src/commands/stop.ts
-var sleep5 = (ms) => new Promise((r) => setTimeout(r, ms));
+var sleep6 = (ms) => new Promise((r) => setTimeout(r, ms));
 function sawSessionEnd(eventFile) {
   return readRawLines(eventFile).some(
     (line) => parseEvent(line)?.event === "session_end"
@@ -1413,10 +1513,10 @@ async function cmdStop(ctx, worker, opts = {}) {
     const deadline = Date.now() + stopTimeout * 1e3;
     while (Date.now() < deadline) {
       if (sawSessionEnd(eventFile)) {
-        await sleep5(settleMs);
+        await sleep6(settleMs);
         break;
       }
-      await sleep5(pollMs);
+      await sleep6(pollMs);
     }
     if (await ctx.tmux.hasSession(tmuxName)) {
       await ctx.tmux.killSession(tmuxName);
@@ -1602,12 +1702,22 @@ function parseWorker(argv) {
   }
   return { worker, rest: argv.slice(i) };
 }
-function buildContext() {
+function resolveWorkerHarness(dir, worker) {
+  const sid = resolveSession(dir, worker);
+  if (sid !== null) {
+    const meta = readMeta(dir, sid);
+    if (meta?.harness) return meta.harness;
+  }
+  return readHarnessMarker(dir, worker) ?? "claude";
+}
+function buildContext(worker) {
+  const dir = workerDir();
+  const harness = worker !== void 0 ? resolveWorkerHarness(dir, worker) : "claude";
   return {
-    workerDir: workerDir(),
+    workerDir: dir,
     home: process.env.HOME ?? (0, import_node_os2.homedir)(),
     tmux,
-    driver: getDriver("claude")
+    driver: getDriver(harness)
   };
 }
 function bootstrapOpts() {
@@ -1725,7 +1835,7 @@ async function run2(argv, io = realIo) {
     io.out(USAGE);
     return 0;
   }
-  const ctx = buildContext();
+  const ctx = buildContext(worker);
   const w = worker;
   switch (sub) {
     case "grant-consent":

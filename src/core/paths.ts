@@ -19,6 +19,17 @@ export function shimPath(dir: string, name: string): string {
   return `${dir}/bin/${name}`;
 }
 
+/**
+ * The sidecar harness marker keyed by tmux_name. Written at launch for derive
+ * harnesses (codex), whose `<sid>.meta` does not exist until the producer
+ * self-registers it on the first prompt — so per-worker commands can load the
+ * right driver during that pre-registration window. Assign harnesses (claude)
+ * carry the harness in the meta from launch and do not need this.
+ */
+export function harnessMarkerPath(dir: string, name: string): string {
+  return `${dir}/${name}.harness`;
+}
+
 export function claudeTranscriptPath(
   home: string,
   cwd: string,

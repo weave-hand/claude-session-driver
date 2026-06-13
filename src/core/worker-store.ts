@@ -8,7 +8,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname } from 'node:path';
-import { eventsPath, metaPath, shimPath } from './paths.js';
+import { eventsPath, harnessMarkerPath, metaPath, shimPath } from './paths.js';
 
 export interface WorkerMeta {
   tmux_name: string;
@@ -61,8 +61,33 @@ export function writeShim(dir: string, name: string, csdEntry: string): string {
   return p;
 }
 
+/**
+ * Write the sidecar harness marker for a derive worker (codex), so per-worker
+ * commands can resolve the right driver before the meta self-registers.
+ */
+export function writeHarnessMarker(
+  dir: string,
+  name: string,
+  harness: string,
+): void {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(harnessMarkerPath(dir, name), harness);
+}
+
+/** Read the sidecar harness marker for `name`, or null if it does not exist. */
+export function readHarnessMarker(dir: string, name: string): string | null {
+  const p = harnessMarkerPath(dir, name);
+  if (!existsSync(p)) return null;
+  try {
+    return readFileSync(p, 'utf8').trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 export function removeWorker(dir: string, sid: string, name: string): void {
   rmSync(metaPath(dir, sid), { force: true });
   rmSync(eventsPath(dir, sid), { force: true });
   rmSync(shimPath(dir, name), { force: true });
+  rmSync(harnessMarkerPath(dir, name), { force: true });
 }

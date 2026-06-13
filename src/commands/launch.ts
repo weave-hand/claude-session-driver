@@ -5,9 +5,15 @@ import { hasConsent } from '../core/consent.js';
 import { ensureBackCompatSymlink, eventsPath } from '../core/paths.js';
 import { shellQuote } from '../core/shell.js';
 import { isoSecondsUtc } from '../core/time.js';
-import { writeMeta, writeShim } from '../core/worker-store.js';
+import {
+  writeHarnessMarker,
+  writeMeta,
+  writeShim,
+} from '../core/worker-store.js';
+import type { HarnessDriver } from '../harness/driver.js';
 import { getDriver } from '../harness/registry.js';
 import { awaitSessionStart } from './await-start.js';
+import { awaitComposerReady, dismissCodexTrustGate } from './codex-launch.js';
 import type { CommandContext, CommandResult } from './context.js';
 
 /** The shared bootstrap options launch and adopt both accept. */
@@ -22,6 +28,14 @@ export interface BootstrapOpts {
   trustTimeoutMs?: number;
   startTimeoutMs?: number;
   pollMs?: number;
+  /**
+   * Codex (derive) launch-gate timing overrides (tests pass tiny values): the
+   * trust-gate dismissal window and the composer-ready window. Unused on the
+   * claude (assign) path.
+   */
+  codexTrustTimeoutMs?: number;
+  codexReadyTimeoutMs?: number;
+  codexTrustSettleMs?: number;
 }
 
 export interface LaunchArgs {
@@ -77,14 +91,30 @@ export function renderPanel(opts: {
 }
 
 /**
- * Launch a fresh worker. Parity port of bash `cmd_launch` (csd:704-790).
+ * The per-worker home dir for a derive harness (codex's CODEX_HOME). Deterministic
+ * from tmux_name so it can be re-derived without persisted state. Each worker gets
+ * its own config/auth/sessions dir under `<workerDir>/homes/<tmuxName>`.
+ */
+export function deriveWorkerHome(workerDir: string, tmuxName: string): string {
+  return join(workerDir, 'homes', tmuxName);
+}
+
+/**
+ * Launch a fresh worker. Parity port of bash `cmd_launch` (csd PR #21).
  *
  * The harness is chosen here, so launch resolves its OWN driver from `harness`
- * (ignoring `ctx.driver`). The driver `prepare`/`postLaunch` seams are invoked
- * around the tmux start (no-ops for claude today; real for codex/pi later). The
- * claude proof-of-life wait (trust dialog + session_start) is orchestrated by
- * `awaitSessionStart`, which needs `ctx.tmux`/`ctx.workerDir` the driver slots
- * don't receive; Phase B/C will route this through the driver for codex/pi.
+ * (ignoring `ctx.driver`). Two id strategies branch after the shared setup
+ * (cwd validation, consent, collision, dir setup):
+ *
+ * - `assign` (claude): csd generates the session id, pre-writes the meta keyed
+ *   by it (so the SessionStart hook can record events), and proof-of-life is a
+ *   `session_start` event (orchestrated by `awaitSessionStart`).
+ * - `derive` (codex): codex mints its OWN id at the first prompt, so csd does
+ *   NOT generate an id or pre-write a meta — instead it writes a sidecar
+ *   `.harness` marker (so per-worker commands resolve the codex driver during
+ *   the pre-registration window) and the producer self-registers the meta on
+ *   the first prompt. There is no session_start at boot, so "proof-of-life" is
+ *   best-effort: dismiss the trust gate, then wait for the composer to be ready.
  */
 export async function cmdLaunch(
   ctx: CommandContext,
@@ -107,8 +137,6 @@ export async function cmdLaunch(
     };
   }
 
-  const sessionId = randomUUID();
-
   // Worker dir + bin dir must exist before writing meta/shim.
   mkdirSync(ctx.workerDir, { recursive: true });
   mkdirSync(join(ctx.workerDir, 'bin'), { recursive: true });
@@ -118,6 +146,31 @@ export async function cmdLaunch(
     extraArgs.length > 0
       ? [tmuxName, cwd, '--', ...extraArgs]
       : [tmuxName, cwd];
+
+  return driver.idStrategy === 'derive'
+    ? launchDerive(ctx, { driver, tmuxName, cwd, extraArgs, invocation }, opts)
+    : launchAssign(ctx, { driver, tmuxName, cwd, extraArgs, invocation }, opts);
+}
+
+interface LaunchInner {
+  driver: HarnessDriver;
+  tmuxName: string;
+  cwd: string;
+  extraArgs: string[];
+  invocation: string[];
+}
+
+/**
+ * The assign-id launch (claude): generate the session id, pre-write the meta,
+ * start tmux, await `session_start` proof-of-life, write the shim. The driver's
+ * worker home is the controller HOME.
+ */
+async function launchAssign(
+  ctx: CommandContext,
+  { driver, tmuxName, cwd, extraArgs, invocation }: LaunchInner,
+  opts: BootstrapOpts,
+): Promise<CommandResult> {
+  const sessionId = randomUUID();
 
   // Pre-write the meta keyed by sessionId so the SessionStart hook can record
   // events the moment the worker starts. The hook only appends events once a
@@ -156,6 +209,59 @@ export async function cmdLaunch(
     sessionId,
     cwd,
     eventsFile: eventsPath(ctx.workerDir, sessionId),
+    csdPath: opts.csdPath,
+    invocation,
+  });
+
+  return { stdout: shim, stderr: panel, code: 0 };
+}
+
+/**
+ * The derive-id launch (codex): NO session id, NO pre-written meta. Write the
+ * sidecar `.harness` marker, prepare the per-worker CODEX_HOME, start tmux,
+ * dismiss the trust gate, wait for the composer, write the shim. The meta
+ * self-registers on the first prompt; the session id / events file are unknown
+ * at launch (shown as placeholders in the panel).
+ */
+async function launchDerive(
+  ctx: CommandContext,
+  { driver, tmuxName, cwd, extraArgs, invocation }: LaunchInner,
+  opts: BootstrapOpts,
+): Promise<CommandResult> {
+  // Sidecar marker so per-worker commands load the codex driver during the
+  // pre-registration window (before the hook self-registers the meta).
+  writeHarnessMarker(ctx.workerDir, tmuxName, driver.id);
+
+  const workerHome = deriveWorkerHome(ctx.workerDir, tmuxName);
+  const env = driver.workerEnv(workerHome, process.env);
+  await driver.prepare(tmuxName, cwd, workerHome);
+
+  const argv = [
+    ...driver.launchArgv('launch', '', cwd, opts.pluginDir, workerHome),
+    ...extraArgs,
+  ];
+  await ctx.tmux.newSession(tmuxName, cwd, env, argv);
+
+  // Dismiss the "Hooks need review" trust gate, then wait for the composer.
+  // Both are best-effort; codex emits no session_start until the first prompt.
+  await dismissCodexTrustGate(ctx, tmuxName, {
+    timeoutMs: opts.codexTrustTimeoutMs,
+    settleMs: opts.codexTrustSettleMs,
+    pollMs: opts.pollMs,
+  });
+  await awaitComposerReady(ctx, tmuxName, {
+    timeoutMs: opts.codexReadyTimeoutMs,
+    pollMs: opts.pollMs,
+  });
+
+  const shim = writeShim(ctx.workerDir, tmuxName, opts.csdEntry);
+  const panel = renderPanel({
+    header: 'Worker launched.',
+    verb: 'launch',
+    tmuxName,
+    sessionId: '(derive — assigned on first prompt)',
+    cwd,
+    eventsFile: '(registered on first prompt)',
     csdPath: opts.csdPath,
     invocation,
   });

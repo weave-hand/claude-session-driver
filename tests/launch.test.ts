@@ -1,15 +1,22 @@
-import { mkdtempSync, realpathSync, rmSync, statSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  statSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { CommandContext } from '../src/commands/context.js';
-import { cmdLaunch } from '../src/commands/launch.js';
+import { cmdLaunch, deriveWorkerHome } from '../src/commands/launch.js';
 import { grantConsent } from '../src/core/consent.js';
 import { appendEvent } from '../src/core/event-log.js';
 import { eventsPath, shimPath } from '../src/core/paths.js';
 import { shellQuote } from '../src/core/shell.js';
 import type { Tmux } from '../src/core/tmux.js';
-import { readMeta } from '../src/core/worker-store.js';
+import { readHarnessMarker, readMeta } from '../src/core/worker-store.js';
 import { getDriver } from '../src/harness/registry.js';
 import { runHook } from '../src/hooks/emit-event.js';
 
@@ -314,5 +321,162 @@ describe('cmdLaunch', () => {
     const sid = argv[argv.indexOf('--session-id') + 1] as string;
     const meta = readMeta(workerDir, sid);
     expect(meta?.invocation).toEqual(['w1', cwd]);
+  });
+});
+
+interface CodexFakeTmuxCalls {
+  newSession: NewSessionCall[];
+  sendText: { name: string; text: string }[];
+  sendEnter: string[];
+}
+
+/**
+ * A fake tmux for the codex (derive) launch. `paneText` drives capturePane so a
+ * test can show the trust gate / composer glyph and have the launch helpers act.
+ */
+function codexFakeTmux(
+  calls: CodexFakeTmuxCalls,
+  paneText: () => string,
+): Tmux {
+  return {
+    async hasSession() {
+      return false;
+    },
+    async killSession() {},
+    async capturePane() {
+      return paneText();
+    },
+    async capturePaneFull() {
+      return paneText();
+    },
+    async sendText(name, text) {
+      calls.sendText.push({ name, text });
+    },
+    async sendEnter(name) {
+      calls.sendEnter.push(name);
+    },
+    async sendKey() {},
+    async newSession(name, cwd, env, argv) {
+      calls.newSession.push({ name, cwd, env, argv });
+    },
+    async respawnPane() {},
+  };
+}
+
+const CODEX_FAST = {
+  codexTrustTimeoutMs: 200,
+  codexReadyTimeoutMs: 200,
+  codexTrustSettleMs: 0,
+  pollMs: 10,
+};
+
+describe('cmdLaunch — codex (derive)', () => {
+  let workerDir: string;
+  let home: string;
+  let rawCwd: string;
+  let cwd: string;
+
+  beforeEach(() => {
+    workerDir = tmpDir('csd-launch-cx-wd-');
+    home = tmpDir('csd-launch-cx-home-');
+    rawCwd = tmpDir('csd-launch-cx-cwd-');
+    cwd = realpathSync(rawCwd);
+  });
+
+  afterEach(() => {
+    rmSync(workerDir, { recursive: true });
+    rmSync(home, { recursive: true });
+    rmSync(rawCwd, { recursive: true });
+  });
+
+  const baseOpts = () => ({
+    pluginDir: '/plugins/superpowers',
+    csdEntry: '/dist/csd.cjs',
+    csdPath: '/usr/local/bin/csd',
+  });
+
+  function codexCtx(tmux: Tmux): CommandContext {
+    return { workerDir, home, tmux, driver: getDriver('codex') };
+  }
+
+  it('launches without an id/meta: writes the .harness marker, dismisses the trust gate, prints the derive panel', async () => {
+    grantConsent(home);
+    const calls: CodexFakeTmuxCalls = {
+      newSession: [],
+      sendText: [],
+      sendEnter: [],
+    };
+    // The pane shows the trust gate and the composer glyph, so both launch
+    // helpers act (dismiss + ready) on the first capture.
+    const ctx = codexCtx(codexFakeTmux(calls, () => 'Hooks need review ›'));
+
+    const result = await cmdLaunch(
+      ctx,
+      { tmuxName: 'cx1', cwd, extraArgs: [], harness: 'codex' },
+      { ...baseOpts(), ...CODEX_FAST },
+    );
+
+    expect(result.code).toBe(0);
+    // stdout is the shim path.
+    expect(result.stdout).toBe(shimPath(workerDir, 'cx1'));
+
+    // No meta was pre-written (codex self-registers it on the first prompt);
+    // no `<sid>.meta` exists for any id.
+    expect(
+      readdirSync(workerDir).filter((f) => f.endsWith('.meta')),
+    ).toHaveLength(0);
+
+    // The sidecar harness marker was written, keyed by tmux name.
+    expect(readHarnessMarker(workerDir, 'cx1')).toBe('codex');
+
+    // The trust gate was dismissed: '2' then Enter.
+    expect(calls.sendText).toEqual([{ name: 'cx1', text: '2' }]);
+    expect(calls.sendEnter).toEqual(['cx1']);
+
+    // tmux started with the codex argv and the per-worker CODEX_HOME env.
+    expect(calls.newSession).toHaveLength(1);
+    const call = calls.newSession[0]!;
+    expect(call.name).toBe('cx1');
+    expect(call.cwd).toBe(cwd);
+    expect(call.env.CODEX_HOME).toBe(deriveWorkerHome(workerDir, 'cx1'));
+    expect(call.argv).toContain('--dangerously-bypass-approvals-and-sandbox');
+    expect(call.argv).toContain('--dangerously-bypass-hook-trust');
+    expect(call.argv.slice(-2)).toEqual(['-C', cwd]);
+
+    // The panel notes the id/events are assigned on the first prompt.
+    expect(result.stderr).toContain('Worker launched.');
+    expect(result.stderr).toContain('tmux:       cx1');
+    expect(result.stderr).toContain(
+      'session_id: (derive — assigned on first prompt)',
+    );
+    expect(result.stderr).toContain('events:     (registered on first prompt)');
+
+    // prepare wrote the per-worker CODEX_HOME config.
+    expect(
+      existsSync(join(deriveWorkerHome(workerDir, 'cx1'), 'config.toml')),
+    ).toBe(true);
+  });
+
+  it('settles (still succeeds) when the trust gate / composer never appear', async () => {
+    grantConsent(home);
+    const calls: CodexFakeTmuxCalls = {
+      newSession: [],
+      sendText: [],
+      sendEnter: [],
+    };
+    // Pane never shows the gate or glyph: both helpers time out best-effort.
+    const ctx = codexCtx(codexFakeTmux(calls, () => 'just booting'));
+
+    const result = await cmdLaunch(
+      ctx,
+      { tmuxName: 'cx2', cwd, extraArgs: [], harness: 'codex' },
+      { ...baseOpts(), ...CODEX_FAST },
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe(shimPath(workerDir, 'cx2'));
+    // No keystrokes sent (the gate never matched).
+    expect(calls.sendText).toEqual([]);
+    expect(calls.sendEnter).toEqual([]);
   });
 });

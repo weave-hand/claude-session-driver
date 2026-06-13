@@ -19,6 +19,11 @@ import { cmdStop } from './commands/stop.js';
 import { cmdWaitForTurn } from './commands/wait-for-turn.js';
 import { workerDir } from './core/paths.js';
 import { tmux } from './core/tmux.js';
+import {
+  readHarnessMarker,
+  readMeta,
+  resolveSession,
+} from './core/worker-store.js';
 import { getDriver } from './harness/registry.js';
 
 /** Writers the dispatcher prints through; tests inject capturing functions. */
@@ -143,13 +148,37 @@ function parseWorker(
   return { worker, rest: argv.slice(i) };
 }
 
-/** Build the CommandContext: real tmux, claude as the default driver. */
-function buildContext(): CommandContext {
+/**
+ * The harness id for a per-worker command's `worker`. Read from the worker meta
+ * (`harness`) once it exists; during a derive worker's pre-registration window
+ * (codex, before its hook self-registers the meta) fall back to the sidecar
+ * `<tmux_name>.harness` marker launch wrote. Defaults to claude when neither is
+ * present (an unknown worker — the command itself reports that).
+ */
+function resolveWorkerHarness(dir: string, worker: string): string {
+  const sid = resolveSession(dir, worker);
+  if (sid !== null) {
+    const meta = readMeta(dir, sid);
+    if (meta?.harness) return meta.harness;
+  }
+  return readHarnessMarker(dir, worker) ?? 'claude';
+}
+
+/**
+ * Build the CommandContext: real tmux and the per-worker harness driver. For
+ * per-worker commands the driver is resolved from the worker's meta/sidecar so
+ * codex workers drive the codex transcript/send paths; top-level commands
+ * (launch/adopt resolve their own driver) get claude as a harmless default.
+ */
+function buildContext(worker?: string): CommandContext {
+  const dir = workerDir();
+  const harness =
+    worker !== undefined ? resolveWorkerHarness(dir, worker) : 'claude';
   return {
-    workerDir: workerDir(),
+    workerDir: dir,
     home: process.env.HOME ?? homedir(),
     tmux,
-    driver: getDriver('claude'),
+    driver: getDriver(harness),
   };
 }
 
@@ -302,7 +331,7 @@ export async function run(argv: string[], io: Io = realIo): Promise<number> {
     return 0;
   }
 
-  const ctx = buildContext();
+  const ctx = buildContext(worker);
   // PER_WORKER_SUBS validation above guarantees `worker` is set for those subs.
   const w = worker as string;
 

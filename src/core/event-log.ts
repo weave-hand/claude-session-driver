@@ -1,4 +1,6 @@
+import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import type { WorkerEvent } from '../events.js';
+import { parseEvent, serializeEvent } from '../events.js';
 
 export type WorkerStatus =
   | 'idle'
@@ -6,6 +8,42 @@ export type WorkerStatus =
   | 'terminated'
   | 'gone'
   | 'unknown';
+
+export function appendEvent(file: string, e: WorkerEvent): void {
+  appendFileSync(file, `${serializeEvent(e)}\n`);
+}
+
+export function readEvents(file: string): WorkerEvent[] {
+  if (!existsSync(file)) return [];
+  const raw = readFileSync(file, 'utf8');
+  return raw
+    .split('\n')
+    .filter((line) => line.length > 0)
+    .map(parseEvent)
+    .filter((e): e is WorkerEvent => e !== null);
+}
+
+export function lastEvent(file: string): WorkerEvent | null {
+  const events = readEvents(file);
+  return events.at(-1) ?? null;
+}
+
+export async function waitForEvent(
+  file: string,
+  pred: (e: WorkerEvent) => boolean,
+  timeoutMs: number,
+  pollMs = 100,
+): Promise<WorkerEvent> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const match = readEvents(file).find(pred);
+    if (match !== undefined) return match;
+    if (Date.now() >= deadline) {
+      throw new Error(`waitForEvent timed out after ${timeoutMs}ms`);
+    }
+    await new Promise((r) => setTimeout(r, pollMs));
+  }
+}
 
 export function classifyStatus(last: WorkerEvent): WorkerStatus {
   switch (last.event) {

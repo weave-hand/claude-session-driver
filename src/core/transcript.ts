@@ -76,6 +76,16 @@ function resultContent(content: unknown): string {
   return String(content);
 }
 
+/**
+ * Narrow a raw array element to a block object, or null if it isn't one.
+ * Real transcripts can contain partial/garbage array elements (null, numbers,
+ * strings); mirror `parseLines`' graceful-degradation by skipping them rather
+ * than throwing on `block.type`.
+ */
+function asBlock(x: unknown): ContentBlock | null {
+  return typeof x === 'object' && x !== null ? (x as ContentBlock) : null;
+}
+
 function collectUser(line: TranscriptLine, out: NormalizedTurn): void {
   const content = line.message?.content;
   if (typeof content === 'string') {
@@ -84,7 +94,9 @@ function collectUser(line: TranscriptLine, out: NormalizedTurn): void {
     return;
   }
   if (!Array.isArray(content)) return;
-  for (const block of content as ContentBlock[]) {
+  for (const raw of content as unknown[]) {
+    const block = asBlock(raw);
+    if (!block) continue;
     if (block.type !== 'tool_result') continue;
     out.push({
       kind: 'tool_result',
@@ -97,15 +109,23 @@ function collectUser(line: TranscriptLine, out: NormalizedTurn): void {
 function collectAssistant(line: TranscriptLine, out: NormalizedTurn): void {
   const content = line.message?.content;
   if (!Array.isArray(content)) return;
-  for (const block of content as ContentBlock[]) {
+  // A missing `thinking`/`text`/`name` field renders as an empty string rather
+  // than the literal "undefined": graceful empty is clearer than jq's behavior
+  // of dropping the whole turn when such a field is absent.
+  for (const raw of content as unknown[]) {
+    const block = asBlock(raw);
+    if (!block) continue;
     if (block.type === 'thinking') {
-      out.push({ kind: 'thinking', text: String(block.thinking) });
+      const text = typeof block.thinking === 'string' ? block.thinking : '';
+      out.push({ kind: 'thinking', text });
     } else if (block.type === 'text') {
-      out.push({ kind: 'text', text: String(block.text) });
+      const text = typeof block.text === 'string' ? block.text : '';
+      out.push({ kind: 'text', text });
     } else if (block.type === 'tool_use') {
+      const name = typeof block.name === 'string' ? block.name : '';
       out.push({
         kind: 'tool_use',
-        name: String(block.name),
+        name,
         input: block.input,
       });
     }
@@ -118,8 +138,7 @@ export function parseClaudeTurn(jsonl: string): NormalizedTurn {
   if (boundary < 0) return [];
 
   const turn: NormalizedTurn = [];
-  for (let i = boundary; i < lines.length; i++) {
-    const line = lines[i] as TranscriptLine;
+  for (const line of lines.slice(boundary)) {
     if (line.type === 'user') collectUser(line, turn);
     else if (line.type === 'assistant') collectAssistant(line, turn);
   }

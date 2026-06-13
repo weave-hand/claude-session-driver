@@ -132,4 +132,59 @@ describe('parseClaudeTurn / renderTurn', () => {
     const md = renderTurn(parseClaudeTurn(lines), { full: false });
     expect(md).toContain('> **Thinking:** line1\n> line2\n');
   });
+
+  it('skips a null element in a user content array and renders the valid tool_result', () => {
+    const lines = [
+      '{"type":"user","message":{"content":"go"}}',
+      '{"type":"user","message":{"content":[null,{"type":"tool_result","content":"ok","is_error":false}]}}',
+    ].join('\n');
+    const turn = parseClaudeTurn(lines);
+    const md = renderTurn(turn, { full: false });
+    expect(md).toContain('**Result:**\n```\nok\n```\n');
+    expect(turn.filter((i) => i.kind === 'tool_result')).toHaveLength(1);
+  });
+
+  it('skips a null element in an assistant content array and renders the valid text', () => {
+    const lines = [
+      '{"type":"user","message":{"content":"go"}}',
+      '{"type":"assistant","message":{"content":[null,{"type":"text","text":"hello"}]}}',
+    ].join('\n');
+    const turn = parseClaudeTurn(lines);
+    const md = renderTurn(turn, { full: false });
+    expect(md).toContain('hello');
+    expect(turn.filter((i) => i.kind === 'text')).toHaveLength(1);
+  });
+
+  it('renders a text block with no .text field as empty, not "undefined"', () => {
+    const lines = [
+      '{"type":"user","message":{"content":"go"}}',
+      '{"type":"assistant","message":{"content":[{"type":"text"}]}}',
+    ].join('\n');
+    const md = renderTurn(parseClaudeTurn(lines), { full: false });
+    expect(md).not.toContain('undefined');
+    expect(md).toBe('---\n\n**Prompt:** go\n\n\n\n');
+  });
+
+  it('renders a tool_use block with no .name as an empty name, not "undefined"', () => {
+    const lines = [
+      '{"type":"user","message":{"content":"go"}}',
+      '{"type":"assistant","message":{"content":[{"type":"tool_use","input":{"cmd":"ls"}}]}}',
+    ].join('\n');
+    const md = renderTurn(parseClaudeTurn(lines), { full: false });
+    expect(md).toContain('**Tool: **');
+    expect(md).not.toContain('undefined');
+  });
+
+  it('contributes no items when message.content is neither string nor array', () => {
+    const lines = [
+      '{"type":"user","message":{"content":"go"}}',
+      '{"type":"assistant","message":{"content":42}}',
+      '{"type":"user","message":{"content":42}}',
+    ].join('\n');
+    const turn = parseClaudeTurn(lines);
+    const md = renderTurn(turn, { full: false });
+    // Only the boundary prompt contributes; the numeric-content lines add nothing.
+    expect(turn.filter((i) => i.kind === 'prompt')).toHaveLength(1);
+    expect(md).toBe('---\n\n**Prompt:** go\n\n');
+  });
 });

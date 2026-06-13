@@ -242,8 +242,10 @@ async function launchDerive(
   ];
   await ctx.tmux.newSession(tmuxName, cwd, env, argv);
 
-  // Dismiss the "Hooks need review" trust gate, then wait for the composer.
-  // Both are best-effort; codex emits no session_start until the first prompt.
+  // Codex post-launch (trust-gate + composer) is handled here in the command
+  // layer via dismissCodexTrustGate/awaitComposerReady rather than through
+  // driver.postLaunch, which is a no-op on the codex driver and cannot reach
+  // the tmux pane directly.
   await dismissCodexTrustGate(ctx, tmuxName, {
     timeoutMs: opts.codexTrustTimeoutMs,
     settleMs: opts.codexTrustSettleMs,

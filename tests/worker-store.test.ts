@@ -2,12 +2,19 @@ import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { eventsPath, metaPath, shimPath } from '../src/core/paths.js';
+import {
+  eventsPath,
+  harnessMarkerPath,
+  metaPath,
+  shimPath,
+} from '../src/core/paths.js';
 import {
   listWorkers,
+  readHarnessMarker,
   readMeta,
   removeWorker,
   resolveSession,
+  writeHarnessMarker,
   writeMeta,
   writeShim,
 } from '../src/core/worker-store.js';
@@ -136,21 +143,44 @@ describe('writeShim', () => {
 });
 
 describe('removeWorker', () => {
-  it('deletes meta, events, and shim files', () => {
+  it('deletes meta, events, shim, and harness-marker files', () => {
     const dir = tmpDir();
     writeMeta(dir, baseMeta);
     writeFileSync(eventsPath(dir, 'sid-abc'), '');
     writeShim(dir, 'my-worker', FAKE_CSD);
+    writeHarnessMarker(dir, 'my-worker', 'codex');
 
     removeWorker(dir, 'sid-abc', 'my-worker');
 
     expect(() => statSync(metaPath(dir, 'sid-abc'))).toThrow();
     expect(() => statSync(eventsPath(dir, 'sid-abc'))).toThrow();
     expect(() => statSync(shimPath(dir, 'my-worker'))).toThrow();
+    expect(() => statSync(harnessMarkerPath(dir, 'my-worker'))).toThrow();
   });
 
   it('does not throw when files are already gone', () => {
     const dir = tmpDir();
     expect(() => removeWorker(dir, 'ghost-sid', 'ghost-worker')).not.toThrow();
+  });
+});
+
+describe('writeHarnessMarker / readHarnessMarker', () => {
+  it('round-trips the harness string', () => {
+    const dir = tmpDir();
+    writeHarnessMarker(dir, 'my-worker', 'codex');
+    expect(readHarnessMarker(dir, 'my-worker')).toBe('codex');
+  });
+
+  it('returns null when the marker file does not exist', () => {
+    const dir = tmpDir();
+    expect(readHarnessMarker(dir, 'no-such-worker')).toBeNull();
+  });
+
+  it('returns null for an empty marker file (trim() || null)', () => {
+    // The implementation does readFileSync(...).trim() || null, so an empty
+    // or whitespace-only file returns null rather than an empty string.
+    const dir = tmpDir();
+    writeFileSync(harnessMarkerPath(dir, 'my-worker'), '   ');
+    expect(readHarnessMarker(dir, 'my-worker')).toBeNull();
   });
 });

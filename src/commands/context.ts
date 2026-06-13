@@ -3,7 +3,7 @@ import type { HarnessDriver } from '../harness/driver.js';
 
 export interface CommandContext {
   workerDir: string;
-  home: string; // $HOME, used for claude transcript path
+  home: string; // $HOME; used for the consent file and driver transcript paths
   tmux: Tmux;
   driver: HarnessDriver; // the per-worker harness driver (claude for now; resolved by CLI/meta)
 }

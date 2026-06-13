@@ -58,27 +58,7 @@ describe('cmdGrantConsent', () => {
     });
     expect(result.code).toBe(1);
     expect(result.stderr).toContain('not granted');
+    expect(result.stdout).toContain('--dangerously-skip-permissions');
     expect(existsSync(consentPath(home))).toBe(false);
-  });
-
-  it('stdout includes the explanatory text before confirm is called', async () => {
-    let capturedStdout = '';
-    const result = await cmdGrantConsent(makeCtx(home), {
-      confirm: async () => {
-        // stdout should already contain the preamble at this point;
-        // for this implementation it's returned in result.stdout together,
-        // so we check the final stdout instead.
-        return false;
-      },
-    });
-    // The preamble is present even when user declines (it's shown before the prompt).
-    // It lands in stdout on the already-granted path; on the grant path it's also stdout.
-    // On decline, the preamble may be in stdout or omitted — match bash which prints to stdout.
-    // Here we just confirm code 1 and stderr message. The preamble content check is covered
-    // by the success path test.
-    capturedStdout = result.stdout ?? '';
-    expect(result.code).toBe(1);
-    // preamble should appear in stdout even on decline
-    expect(capturedStdout).toContain('--dangerously-skip-permissions');
   });
 });

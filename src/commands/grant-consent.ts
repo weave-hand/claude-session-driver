@@ -4,9 +4,7 @@ import type { CommandContext, CommandResult } from './context.js';
 const PREAMBLE = `claude-session-driver runs workers with --dangerously-skip-permissions.
 Workers execute tool calls without prompting. By granting consent, you
 acknowledge this risk and accept responsibility for any actions the
-worker takes.
-
-Type 'yes' to grant consent:`;
+worker takes.`;
 
 export interface GrantConsentOpts {
   /** Called after the preamble is displayed. Return true if the user typed 'yes'. */

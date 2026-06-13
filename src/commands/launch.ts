@@ -5,7 +5,6 @@ import { hasConsent } from '../core/consent.js';
 import { ensureBackCompatSymlink, eventsPath } from '../core/paths.js';
 import { isoSecondsUtc } from '../core/time.js';
 import { writeMeta, writeShim } from '../core/worker-store.js';
-import type { HarnessId } from '../harness/driver.js';
 import { getDriver } from '../harness/registry.js';
 import { awaitSessionStart } from './await-start.js';
 import type { CommandContext, CommandResult } from './context.js';
@@ -41,8 +40,11 @@ export interface LaunchArgs {
   tmuxName: string;
   cwd: string;
   extraArgs: string[];
-  /** The harness to launch; the command resolves its own driver from this. */
-  harness: HarnessId;
+  /**
+   * The harness to launch; the command resolves its own driver from this via
+   * getDriver, which validates the id (the CLI also validates it at parse time).
+   */
+  harness: string;
 }
 
 /** The one-time-consent error, matching the bash text. */

@@ -19,7 +19,6 @@ import { cmdStop } from './commands/stop.js';
 import { cmdWaitForTurn } from './commands/wait-for-turn.js';
 import { workerDir } from './core/paths.js';
 import { tmux } from './core/tmux.js';
-import type { HarnessId } from './harness/driver.js';
 import { getDriver } from './harness/registry.js';
 
 /** Writers the dispatcher prints through; tests inject capturing functions. */
@@ -168,7 +167,11 @@ function bootstrapOpts(): BootstrapOpts {
   };
 }
 
-/** Read one line from stdin, resolving the trimmed string. */
+/**
+ * Read one line from stdin, resolving the trimmed string. On EOF without a line
+ * (empty pipe), the readline interface closes and we resolve '' so the caller
+ * does not hang forever waiting for a line that never arrives.
+ */
 function readLine(): Promise<string> {
   return new Promise((res) => {
     const rl = createInterface({ input: process.stdin });
@@ -176,6 +179,7 @@ function readLine(): Promise<string> {
       rl.close();
       res(line.trim());
     });
+    rl.once('close', () => res(''));
   });
 }
 
@@ -183,11 +187,11 @@ function readLine(): Promise<string> {
 function parseLaunchArgs(
   argv: string[],
 ):
-  | { tmuxName: string; cwd: string; extraArgs: string[]; harness: HarnessId }
+  | { tmuxName: string; cwd: string; extraArgs: string[]; harness: string }
   | DispatchError {
   const usage = 'Usage: launch <tmux-name> <cwd> [-- claude-args...]';
   const positionals: string[] = [];
-  let harness: HarnessId = 'claude';
+  let harness = 'claude';
   let extraArgs: string[] = [];
   let i = 0;
   while (i < argv.length) {
@@ -197,8 +201,19 @@ function parseLaunchArgs(
       break;
     }
     if (a === '--harness') {
-      if (i + 1 >= argv.length) return err(usage);
-      harness = argv[i + 1] as HarnessId;
+      const value = argv[i + 1];
+      if (value === undefined) {
+        return err('Error: --harness expects a value for launch');
+      }
+      // Validate the id against the driver registry at parse time so an unknown
+      // harness yields a clean code-2 error instead of a stack trace from
+      // getDriver() inside cmdLaunch.
+      try {
+        getDriver(value);
+      } catch (e) {
+        return err((e as Error).message);
+      }
+      harness = value;
       i += 2;
       continue;
     }
@@ -337,14 +352,21 @@ export async function run(argv: string[], io: Io = realIo): Promise<number> {
         io.err('Usage: converse [--with-turn] <prompt> [timeout=120]\n');
         return 1;
       }
-      const timeout = args[i + 1] !== undefined ? Number(args[i + 1]) : 120;
+      let timeout = 120;
+      if (args[i + 1] !== undefined) {
+        timeout = Number(args[i + 1]);
+        if (!Number.isFinite(timeout)) {
+          io.err('Error: converse timeout must be a number\n');
+          return 2;
+        }
+      }
       return emit(io, await cmdConverse(ctx, w, prompt, { withTurn, timeout }));
     }
 
     case 'send': {
       const prompt = args[0];
       if (prompt === undefined) {
-        io.err('Usage: send <prompt>\n');
+        io.err('Usage: send <prompt-text>\n');
         return 1;
       }
       return emit(io, await cmdSend(ctx, w, prompt));
@@ -431,7 +453,12 @@ function parseWaitForTurnArgs(
   while (i < argv.length) {
     const a = argv[i] ?? '';
     if (a === '--after-line') {
-      afterLine = Number(argv[i + 1]);
+      const value = argv[i + 1];
+      const n = value !== undefined ? Number(value) : Number.NaN;
+      if (!Number.isFinite(n)) {
+        return err('Error: --after-line expects a number for wait-for-turn');
+      }
+      afterLine = n;
       i += 2;
     } else if (/^[0-9]/.test(a)) {
       timeout = Number(a);
@@ -458,10 +485,21 @@ function parseReadEventsArgs(argv: string[]): ReadEventsArgs | DispatchError {
   while (i < argv.length) {
     const a = argv[i] ?? '';
     if (a === '--last') {
-      last = Number(argv[i + 1]);
+      const value = argv[i + 1];
+      const n = value !== undefined ? Number(value) : Number.NaN;
+      if (!Number.isFinite(n)) {
+        return err('Error: --last expects a number for read-events');
+      }
+      last = n;
       i += 2;
     } else if (a === '--type') {
-      type = argv[i + 1];
+      const value = argv[i + 1];
+      // A missing value or a following flag (e.g. `--type --follow`) means the
+      // type value is absent; do not swallow the next flag as the value.
+      if (value === undefined || value.startsWith('--')) {
+        return err('Error: --type expects a value for read-events');
+      }
+      type = value;
       i += 2;
     } else if (a === '--follow') {
       follow = true;
@@ -476,20 +514,34 @@ function parseReadEventsArgs(argv: string[]): ReadEventsArgs | DispatchError {
 /**
  * Stream events to stdout until SIGINT. followEvents emits lines WITHOUT a
  * trailing newline, so the sink appends one. Resolves 0 once aborted.
+ *
+ * Tests inject `signal`/`pollMs` to drive the stream deterministically (append a
+ * line, assert it arrives, abort). In production neither is passed: an internal
+ * AbortController is wired to SIGINT.
  */
-function followStream(
+export function followStream(
   ctx: CommandContext,
   worker: string,
-  opts: { type?: string },
+  opts: { type?: string; pollMs?: number },
   io: Io,
+  signal?: AbortSignal,
 ): Promise<number> {
+  if (signal !== undefined) {
+    return followEvents(
+      ctx,
+      worker,
+      { type: opts.type, pollMs: opts.pollMs },
+      (line) => io.out(`${line}\n`),
+      signal,
+    ).then(() => 0);
+  }
   const controller = new AbortController();
   const onSigint = () => controller.abort();
   process.on('SIGINT', onSigint);
   return followEvents(
     ctx,
     worker,
-    { type: opts.type },
+    { type: opts.type, pollMs: opts.pollMs },
     (line) => io.out(`${line}\n`),
     controller.signal,
   )
@@ -515,5 +567,10 @@ if (
   typeof module !== 'undefined' &&
   require.main === module
 ) {
-  run(process.argv.slice(2)).then((c) => process.exit(c));
+  run(process.argv.slice(2))
+    .then((c) => process.exit(c))
+    .catch((e) => {
+      process.stderr.write(`${e instanceof Error ? e.message : String(e)}\n`);
+      process.exit(1);
+    });
 }

@@ -20,6 +20,7 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // src/cli.ts
 var cli_exports = {};
 __export(cli_exports, {
+  followStream: () => followStream,
   run: () => run2
 });
 module.exports = __toCommonJS(cli_exports);
@@ -1351,6 +1352,7 @@ function readLine() {
       rl.close();
       res(line.trim());
     });
+    rl.once("close", () => res(""));
   });
 }
 function parseLaunchArgs(argv) {
@@ -1366,8 +1368,16 @@ function parseLaunchArgs(argv) {
       break;
     }
     if (a === "--harness") {
-      if (i + 1 >= argv.length) return err(usage);
-      harness = argv[i + 1];
+      const value = argv[i + 1];
+      if (value === void 0) {
+        return err("Error: --harness expects a value for launch");
+      }
+      try {
+        getDriver(value);
+      } catch (e) {
+        return err(e.message);
+      }
+      harness = value;
       i += 2;
       continue;
     }
@@ -1489,13 +1499,20 @@ async function run2(argv, io = realIo) {
         io.err("Usage: converse [--with-turn] <prompt> [timeout=120]\n");
         return 1;
       }
-      const timeout = args[i + 1] !== void 0 ? Number(args[i + 1]) : 120;
+      let timeout = 120;
+      if (args[i + 1] !== void 0) {
+        timeout = Number(args[i + 1]);
+        if (!Number.isFinite(timeout)) {
+          io.err("Error: converse timeout must be a number\n");
+          return 2;
+        }
+      }
       return emit(io, await cmdConverse(ctx, w, prompt, { withTurn, timeout }));
     }
     case "send": {
       const prompt = args[0];
       if (prompt === void 0) {
-        io.err("Usage: send <prompt>\n");
+        io.err("Usage: send <prompt-text>\n");
         return 1;
       }
       return emit(io, await cmdSend(ctx, w, prompt));
@@ -1567,7 +1584,12 @@ function parseWaitForTurnArgs(argv) {
   while (i < argv.length) {
     const a = argv[i] ?? "";
     if (a === "--after-line") {
-      afterLine = Number(argv[i + 1]);
+      const value = argv[i + 1];
+      const n = value !== void 0 ? Number(value) : Number.NaN;
+      if (!Number.isFinite(n)) {
+        return err("Error: --after-line expects a number for wait-for-turn");
+      }
+      afterLine = n;
       i += 2;
     } else if (/^[0-9]/.test(a)) {
       timeout = Number(a);
@@ -1586,10 +1608,19 @@ function parseReadEventsArgs(argv) {
   while (i < argv.length) {
     const a = argv[i] ?? "";
     if (a === "--last") {
-      last = Number(argv[i + 1]);
+      const value = argv[i + 1];
+      const n = value !== void 0 ? Number(value) : Number.NaN;
+      if (!Number.isFinite(n)) {
+        return err("Error: --last expects a number for read-events");
+      }
+      last = n;
       i += 2;
     } else if (a === "--type") {
-      type = argv[i + 1];
+      const value = argv[i + 1];
+      if (value === void 0 || value.startsWith("--")) {
+        return err("Error: --type expects a value for read-events");
+      }
+      type = value;
       i += 2;
     } else if (a === "--follow") {
       follow = true;
@@ -1600,14 +1631,24 @@ function parseReadEventsArgs(argv) {
   }
   return { last, type, follow };
 }
-function followStream(ctx, worker, opts, io) {
+function followStream(ctx, worker, opts, io, signal) {
+  if (signal !== void 0) {
+    return followEvents(
+      ctx,
+      worker,
+      { type: opts.type, pollMs: opts.pollMs },
+      (line) => io.out(`${line}
+`),
+      signal
+    ).then(() => 0);
+  }
   const controller = new AbortController();
   const onSigint = () => controller.abort();
   process.on("SIGINT", onSigint);
   return followEvents(
     ctx,
     worker,
-    { type: opts.type },
+    { type: opts.type, pollMs: opts.pollMs },
     (line) => io.out(`${line}
 `),
     controller.signal
@@ -1619,9 +1660,14 @@ async function grantConsentConfirm(io) {
   return reply === "yes";
 }
 if (typeof require !== "undefined" && typeof module !== "undefined" && require.main === module) {
-  run2(process.argv.slice(2)).then((c) => process.exit(c));
+  run2(process.argv.slice(2)).then((c) => process.exit(c)).catch((e) => {
+    process.stderr.write(`${e instanceof Error ? e.message : String(e)}
+`);
+    process.exit(1);
+  });
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  followStream,
   run
 });

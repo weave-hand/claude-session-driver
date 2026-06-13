@@ -2,7 +2,13 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { run } from '../src/cli.js';
+import { followStream, run } from '../src/cli.js';
+import type { CommandContext } from '../src/commands/context.js';
+import { appendEvent } from '../src/core/event-log.js';
+import { eventsPath } from '../src/core/paths.js';
+import { makeTmux } from '../src/core/tmux.js';
+import { writeMeta } from '../src/core/worker-store.js';
+import { getDriver } from '../src/harness/registry.js';
 
 /** Capture stdout/stderr that `run` would write. */
 function makeIo() {
@@ -183,7 +189,7 @@ describe('run — validation and dispatch', () => {
     const { io, err } = makeIo();
     const code = await run(['--worker', 'w', 'send'], io);
     expect(code).toBe(1);
-    expect(err()).toContain('Usage: send <prompt>');
+    expect(err()).toContain('Usage: send <prompt-text>');
   });
 
   it('accepts --worker=value form', async () => {
@@ -191,5 +197,124 @@ describe('run — validation and dispatch', () => {
     const code = await run(['--worker=nope', 'status'], io);
     expect(code).toBe(1);
     expect(err()).toContain("Error: no worker known as 'nope'");
+  });
+
+  it('rejects read-events --last with no value (would otherwise be NaN → all lines)', async () => {
+    const { io, err } = makeIo();
+    const code = await run(['--worker', 'w', 'read-events', '--last'], io);
+    expect(code).toBe(2);
+    expect(err()).toContain('Error: --last expects a number for read-events');
+  });
+
+  it('rejects read-events --type swallowing a following flag (--type --follow)', async () => {
+    const { io, err } = makeIo();
+    const code = await run(
+      ['--worker', 'w', 'read-events', '--type', '--follow'],
+      io,
+    );
+    expect(code).toBe(2);
+    expect(err()).toContain('Error: --type expects a value for read-events');
+  });
+
+  it('rejects wait-for-turn --after-line with no value', async () => {
+    const { io, err } = makeIo();
+    const code = await run(
+      ['--worker', 'w', 'wait-for-turn', '--after-line'],
+      io,
+    );
+    expect(code).toBe(2);
+    expect(err()).toContain(
+      'Error: --after-line expects a number for wait-for-turn',
+    );
+  });
+
+  it('rejects converse with a non-numeric timeout positional', async () => {
+    const { io, err } = makeIo();
+    const code = await run(
+      ['--worker', 'w', 'converse', 'hello', 'notanumber'],
+      io,
+    );
+    expect(code).toBe(2);
+    expect(err()).toContain('Error: converse timeout must be a number');
+  });
+
+  it('rejects launch --harness bogus with a clean code-2 message (not a stack trace)', async () => {
+    const { io, err } = makeIo();
+    const tmpCwd = mkdtempSync(join(tmpdir(), 'csd-cwd-'));
+    try {
+      const code = await run(['launch', 'x', tmpCwd, '--harness', 'bogus'], io);
+      expect(code).toBe(2);
+      expect(err()).toContain("Unknown harness 'bogus'");
+      expect(err()).toContain('Available: claude');
+    } finally {
+      rmSync(tmpCwd, { recursive: true, force: true });
+    }
+  });
+
+  it('uses send <prompt-text> in the missing-prompt message (bash parity)', async () => {
+    const { io, err } = makeIo();
+    const code = await run(['--worker', 'w', 'send'], io);
+    expect(code).toBe(1);
+    expect(err()).toContain('Usage: send <prompt-text>');
+  });
+});
+
+describe('followStream — the --follow streaming sink', () => {
+  let workerDir: string;
+
+  function makeCtx(): CommandContext {
+    return {
+      workerDir,
+      home: workerDir,
+      tmux: makeTmux(async () => ({ stdout: '', stderr: '', code: 0 })),
+      driver: getDriver('claude'),
+    };
+  }
+
+  beforeEach(() => {
+    workerDir = mkdtempSync(join(tmpdir(), 'csd-follow-'));
+    writeMeta(workerDir, {
+      tmux_name: 'follow-worker',
+      session_id: 'sid-follow',
+      cwd: '/home/user/project',
+      harness: 'claude',
+    });
+  });
+
+  afterEach(() => {
+    rmSync(workerDir, { recursive: true, force: true });
+  });
+
+  it('delivers newline-terminated lines to io.out, then resolves 0 on abort', async () => {
+    const out: string[] = [];
+    const io = { out: (s: string) => out.push(s), err: () => {} };
+    const ef = eventsPath(workerDir, 'sid-follow');
+    appendEvent(ef, { event: 'session_start', ts: '2025-01-01T00:00:00Z' });
+
+    const ctrl = new AbortController();
+    const done = followStream(
+      makeCtx(),
+      'sid-follow',
+      { pollMs: 5 },
+      io,
+      ctrl.signal,
+    );
+
+    // Give the poll loop a moment, then append a fresh line.
+    await new Promise((r) => setTimeout(r, 20));
+    appendEvent(ef, { event: 'stop', ts: '2025-01-01T00:00:01Z' });
+    await new Promise((r) => setTimeout(r, 20));
+    ctrl.abort();
+
+    const code = await done;
+    expect(code).toBe(0);
+    // The sink appends a trailing newline to each emitted raw line.
+    expect(out).toContain(
+      '{"event":"session_start","ts":"2025-01-01T00:00:00Z"}\n',
+    );
+    expect(out).toContain('{"event":"stop","ts":"2025-01-01T00:00:01Z"}\n');
+    for (const chunk of out) {
+      expect(chunk.endsWith('\n')).toBe(true);
+    }
   });
 });

@@ -27,6 +27,21 @@ export function makeTmux(run: Runner = realRun) {
       return result.stdout;
     },
 
+    /** Returns the captured pane text including the full scrollback history. */
+    async capturePaneFull(name: string): Promise<string> {
+      const result = await run('tmux', [
+        'capture-pane',
+        '-t',
+        name,
+        '-p',
+        '-S',
+        '-',
+        '-E',
+        '-',
+      ]);
+      return result.stdout;
+    },
+
     /** Send text literally to the pane (no key-name interpretation). */
     async sendText(name: string, text: string): Promise<void> {
       await run('tmux', ['send-keys', '-t', name, '-l', text]);

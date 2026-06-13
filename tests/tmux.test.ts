@@ -82,6 +82,25 @@ describe('makeTmux', () => {
     expect(output).toBe('pane content\n');
   });
 
+  it('capturePaneFull captures full scrollback and returns stdout', async () => {
+    const run = vi
+      .fn()
+      .mockResolvedValue({ stdout: 'full\nscrollback\n', stderr: '', code: 0 });
+    const tmux = makeTmux(run);
+    const output = await tmux.capturePaneFull('mysession');
+    expect(run).toHaveBeenCalledWith('tmux', [
+      'capture-pane',
+      '-t',
+      'mysession',
+      '-p',
+      '-S',
+      '-',
+      '-E',
+      '-',
+    ]);
+    expect(output).toBe('full\nscrollback\n');
+  });
+
   it('sendKey sends a named key without -l flag', async () => {
     const run = makeStub();
     const tmux = makeTmux(run);

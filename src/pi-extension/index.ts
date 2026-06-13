@@ -235,4 +235,126 @@
  * ----------------------------------------------------------------------------
  */
 
-export {};
+import { existsSync } from 'node:fs';
+import type {
+  AgentEndEvent,
+  ExtensionAPI,
+  ExtensionContext,
+  InputEvent,
+  SessionShutdownEvent,
+  SessionStartEvent,
+  ToolCallEvent,
+  ToolResultEvent,
+} from '@earendil-works/pi-coding-agent';
+import { appendEvent } from '../core/event-log.js';
+import { eventsPath, metaPath } from '../core/paths.js';
+import { isoSecondsUtc } from '../core/time.js';
+import { writeMeta } from '../core/worker-store.js';
+import type { WorkerEvent } from '../events.js';
+
+/**
+ * ============================================================================
+ * C2 — the csd worker control plane for Pi, as a native extension.
+ * ============================================================================
+ *
+ * ENV CONTRACT (set by the pi driver, C3, in the worker's tmux env via `-e`):
+ *   - CSD_WORKER_DIR — where `<sid>.events.jsonl` + `<sid>.meta` are written.
+ *     If UNSET the extension no-ops every handler (it is not a managed worker),
+ *     so a user running plain `pi -e <ext>` outside csd records nothing.
+ *   - CSD_TMUX_NAME — the tmux window name baked into the self-registered meta
+ *     so the controller can resolve the worker by name. Empty if unset.
+ *
+ * SELF-REGISTRATION: pi mints its own session id (derive strategy), so csd
+ * cannot pre-write `<sid>.meta` at launch. On the FIRST recorded event for a
+ * sid the extension writes the meta — `{ tmux_name, session_id, cwd, harness:
+ * 'pi', transcript_path }` — mirroring the codex hook (src/hooks/emit-event.ts).
+ * It never overwrites an existing meta.
+ *
+ * BEST-EFFORT / NEVER THROW: every handler swallows its own errors. A throw out
+ * of a pi handler could destabilize pi (same rationale as the hooks no-op on bad
+ * input). Recording a worker's activity must never crash the worker.
+ */
+
+/** Read the worker dir from the env, or null when this is not a managed worker. */
+function workerDirFromEnv(): string | null {
+  const dir = process.env.CSD_WORKER_DIR;
+  return dir !== undefined && dir.length > 0 ? dir : null;
+}
+
+/**
+ * Self-register `<sid>.meta` if it does not already exist, then append `e` to
+ * `<sid>.events.jsonl`. No-ops (returns) when CSD_WORKER_DIR is unset. All work
+ * is wrapped so a failure here never escapes into pi.
+ */
+function record(ctx: ExtensionContext, e: WorkerEvent): void {
+  try {
+    const dir = workerDirFromEnv();
+    if (dir === null) return;
+
+    const sid = ctx.sessionManager.getSessionId();
+    if (sid.length === 0) return;
+
+    if (!existsSync(metaPath(dir, sid))) {
+      const transcriptPath = ctx.sessionManager.getSessionFile();
+      writeMeta(dir, {
+        tmux_name: process.env.CSD_TMUX_NAME ?? '',
+        session_id: sid,
+        cwd: ctx.cwd,
+        harness: 'pi',
+        ...(transcriptPath !== undefined && transcriptPath.length > 0
+          ? { transcript_path: transcriptPath }
+          : {}),
+      });
+    }
+
+    appendEvent(eventsPath(dir, sid), e);
+  } catch {
+    // Best-effort recording: never throw out of a pi handler.
+  }
+}
+
+/**
+ * Default factory pi calls with the ExtensionAPI. Registers the six lifecycle
+ * handlers that map pi events to our WorkerEvent vocabulary. Synchronous: there
+ * is no async setup, so pi has nothing to await before `session_start`.
+ */
+export default function csdPiExtension(pi: ExtensionAPI): void {
+  pi.on('session_start', (_event: SessionStartEvent, ctx) => {
+    record(ctx, { event: 'session_start', ts: isoSecondsUtc(), cwd: ctx.cwd });
+  });
+
+  pi.on('input', (event: InputEvent, ctx) => {
+    // Only a real interactive submit is a "user prompt"; rpc/extension-sourced
+    // input is machinery, not the operator typing.
+    if (event.source !== 'interactive') return;
+    record(ctx, { event: 'user_prompt_submit', ts: isoSecondsUtc() });
+  });
+
+  pi.on('tool_call', (event: ToolCallEvent, ctx) => {
+    record(ctx, {
+      event: 'pre_tool_use',
+      ts: isoSecondsUtc(),
+      tool: event.toolName,
+      tool_input: event.input,
+    });
+  });
+
+  pi.on('tool_result', (event: ToolResultEvent, ctx) => {
+    record(ctx, {
+      event: 'post_tool_use',
+      ts: isoSecondsUtc(),
+      tool: event.toolName,
+    });
+  });
+
+  pi.on('agent_end', (_event: AgentEndEvent, ctx) => {
+    record(ctx, { event: 'stop', ts: isoSecondsUtc() });
+  });
+
+  pi.on('session_shutdown', (event: SessionShutdownEvent, ctx) => {
+    // Shutdown also fires on /new, /resume, /fork, /reload — only `quit` is a
+    // true process-exit session_end.
+    if (event.reason !== 'quit') return;
+    record(ctx, { event: 'session_end', ts: isoSecondsUtc() });
+  });
+}

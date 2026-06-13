@@ -82,5 +82,8 @@ export function makeTmux(run: Runner = realRun) {
   };
 }
 
+/** The type of the tmux client object returned by makeTmux. */
+export type Tmux = ReturnType<typeof makeTmux>;
+
 /** Default real tmux instance. */
 export const tmux = makeTmux();

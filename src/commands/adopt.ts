@@ -81,7 +81,7 @@ export async function cmdAdopt(
     invocation,
   });
 
-  const env = driver.workerEnv(process.env);
+  const env = driver.workerEnv(ctx.home, process.env);
   await driver.prepare(tmuxName, cwd, ctx.home);
 
   const argv = [

@@ -46,11 +46,19 @@ export interface HarnessDriver {
 
   /**
    * The env pins for a worker's tmux session, derived from the controller's env.
-   * Harness-specific: claude scrubs stale provider/IDE vars (issue #18); codex/pi
-   * will have their own handling. The launch command expands the returned record
+   * Harness-specific: claude scrubs stale provider/IDE vars (issue #18); codex
+   * pins `CODEX_HOME` to the per-worker home so the worker uses its own
+   * config/auth/sessions dir. The launch command expands the returned record
    * into `-e KEY=VALUE` pairs via `tmux.newSession`/`respawnPane`.
+   *
+   * `workerHome` is the per-worker home dir (claude: the controller HOME; codex:
+   * the per-worker CODEX_HOME). It is part of the signature because codex's env
+   * genuinely depends on it; claude ignores it.
    */
-  workerEnv(controllerEnv?: NodeJS.ProcessEnv): Record<string, string>;
+  workerEnv(
+    workerHome: string,
+    controllerEnv?: NodeJS.ProcessEnv,
+  ): Record<string, string>;
 
   /**
    * The full program argv (binary FIRST, so it can be passed straight to

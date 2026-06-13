@@ -2,9 +2,9 @@
  * Normalized turn model + shared markdown renderer + Claude transcript parser.
  *
  * PARSE is harness-specific: read a transcript's JSONL and produce a
- * NormalizedTurn. RENDER is shared: NormalizedTurn -> markdown. Codex and Pi
- * drivers will add their own parse functions producing the SAME NormalizedTurn
- * and reuse `renderTurn`.
+ * NormalizedTurn. RENDER is shared: NormalizedTurn -> markdown. `parseClaudeTurn`
+ * and `parseCodexTurn` both produce the SAME NormalizedTurn and reuse
+ * `renderTurn`; the Pi driver will add its own parse the same way.
  *
  * This is a character-for-character port of the jq pipeline in the bash `csd`
  * (skills/driving-claude-code-sessions/scripts/csd). jq `-r` prints each emitted
@@ -141,6 +141,124 @@ export function parseClaudeTurn(jsonl: string): NormalizedTurn {
   for (const line of lines.slice(boundary)) {
     if (line.type === 'user') collectUser(line, turn);
     else if (line.type === 'assistant') collectAssistant(line, turn);
+  }
+  return turn;
+}
+
+/**
+ * Codex rollout parse. The rollout is JSONL of `{"type":"response_item",...}`
+ * and `{"type":"event_msg",...}` lines. Parity with the bash `harness_parse_turn`
+ * jq pipeline (drivers/codex.sh), normalized into the SHARED TurnItem model so
+ * `renderTurn` works unchanged.
+ *
+ * Turn start = the last `response_item` with `payload.role == "user"`; if none,
+ * start from line 1. From there each `response_item` maps:
+ *   message(role=user)      -> prompt   (bash rendered `**[user]**`; we map to
+ *   message(role!=user)     -> text      the existing kinds so the shared
+ *   reasoning               -> thinking  renderer applies — see driver docs)
+ *   function_call           -> tool_use   (arguments passed through: string or object)
+ *   function_call_output    -> tool_result (output coerced to string, isError:false)
+ * Anything else (and `event_msg`) is skipped. Parsing is defensive: malformed
+ * lines, non-object payloads, and missing fields degrade to empty/skip, never throw.
+ */
+
+interface RolloutLine {
+  type?: unknown;
+  payload?: unknown;
+}
+
+interface RolloutPayload {
+  type?: unknown;
+  role?: unknown;
+  content?: unknown;
+  summary?: unknown;
+  name?: unknown;
+  arguments?: unknown;
+  output?: unknown;
+}
+
+function parseRolloutLines(jsonl: string): RolloutLine[] {
+  const out: RolloutLine[] = [];
+  for (const line of jsonl.split('\n')) {
+    if (line.length === 0) continue;
+    try {
+      const parsed: unknown = JSON.parse(line);
+      if (typeof parsed === 'object' && parsed !== null) {
+        out.push(parsed as RolloutLine);
+      }
+    } catch {
+      // Real rollouts can contain partial/garbage lines; skip them.
+    }
+  }
+  return out;
+}
+
+function asPayload(line: RolloutLine): RolloutPayload | null {
+  if (line.type !== 'response_item') return null;
+  const p = line.payload;
+  return typeof p === 'object' && p !== null ? (p as RolloutPayload) : null;
+}
+
+/** Join `content[].text` / `content[].output_text` of a codex message payload. */
+function messageText(content: unknown): string {
+  if (!Array.isArray(content)) return '';
+  return (content as unknown[])
+    .map((raw) => {
+      const block = asBlock(raw);
+      if (!block) return '';
+      if (typeof block.text === 'string') return block.text;
+      const out = (block as { output_text?: unknown }).output_text;
+      return typeof out === 'string' ? out : '';
+    })
+    .join('');
+}
+
+/** Join the `text` of each reasoning `summary[]` entry (or the entry itself). */
+function reasoningText(summary: unknown): string {
+  if (!Array.isArray(summary)) return '';
+  return (summary as unknown[])
+    .map((raw) => {
+      if (typeof raw === 'string') return raw;
+      const block = asBlock(raw);
+      return block && typeof block.text === 'string' ? block.text : '';
+    })
+    .join(' ');
+}
+
+/** Index of the last user `response_item` message, or 0 to start from line 1. */
+function findCodexBoundary(lines: RolloutLine[]): number {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const p = asPayload(lines[i] as RolloutLine);
+    if (p && p.type === 'message' && p.role === 'user') return i;
+  }
+  return 0;
+}
+
+export function parseCodexTurn(jsonl: string): NormalizedTurn {
+  const lines = parseRolloutLines(jsonl);
+  if (lines.length === 0) return [];
+  const boundary = findCodexBoundary(lines);
+
+  const turn: NormalizedTurn = [];
+  for (const line of lines.slice(boundary)) {
+    const p = asPayload(line);
+    if (!p) continue;
+    if (p.type === 'message') {
+      const text = messageText(p.content);
+      if (p.role === 'user') turn.push({ kind: 'prompt', text });
+      else turn.push({ kind: 'text', text });
+    } else if (p.type === 'reasoning') {
+      turn.push({ kind: 'thinking', text: reasoningText(p.summary) });
+    } else if (p.type === 'function_call') {
+      const name = typeof p.name === 'string' ? p.name : '';
+      turn.push({ kind: 'tool_use', name, input: p.arguments });
+    } else if (p.type === 'function_call_output') {
+      turn.push({
+        kind: 'tool_result',
+        content: resultContent(p.output),
+        isError: false,
+      });
+    }
   }
   return turn;
 }

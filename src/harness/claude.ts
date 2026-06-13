@@ -59,7 +59,10 @@ export const claude: HarnessDriver = {
     return process.env.CSD_CLAUDE_BIN ?? 'claude';
   },
 
+  // Claude's worker HOME is the controller HOME, so `workerHome` is ignored;
+  // the param exists because codex's env depends on its per-worker CODEX_HOME.
   workerEnv(
+    _workerHome: string,
     controllerEnv: NodeJS.ProcessEnv = process.env,
   ): Record<string, string> {
     return claudeWorkerEnv(controllerEnv);

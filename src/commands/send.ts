@@ -23,7 +23,11 @@ function envNumber(name: string, dflt: number): number {
 export interface SendOpts {
   /** Submission-confirm timeout in SECONDS (default 10, honours CSD_SUBMIT_TIMEOUT). */
   submitTimeout?: number;
-  /** Seconds between retry-Enter resends (default 2, honours CSD_SUBMIT_RETRY_INTERVAL). */
+  /**
+   * Seconds between retry-Enter resends (default 2, honours CSD_SUBMIT_RETRY_INTERVAL).
+   * Controls both the derive-worker pre-registration Enter cadence (sendDeriveFirst's
+   * poll loop) and the post-paste submission-confirm cadence (confirmSubmission).
+   */
   retryInterval?: number;
   /** Poll interval in ms (default 250). Small values keep tests fast. */
   pollMs?: number;
@@ -151,6 +155,8 @@ async function sendDeriveFirst(
     sid = resolveSession(ctx.workerDir, worker);
   }
 
+  // confirmSubmission will send Enter again; the extra Enter is a safe no-op
+  // once the prompt is already submitted (idempotent per issue #20).
   return confirmSubmission(
     ctx,
     worker,

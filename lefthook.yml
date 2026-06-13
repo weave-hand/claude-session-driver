@@ -3,7 +3,7 @@ pre-commit:
   commands:
     biome:
       glob: '*.{ts,json}'
-      run: pnpm biome check {staged_files}
+      run: pnpm biome check --no-errors-on-unmatched {staged_files}
       stage_fixed: true
     typecheck:
       glob: '*.ts'

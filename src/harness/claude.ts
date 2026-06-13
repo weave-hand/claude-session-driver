@@ -59,6 +59,12 @@ export const claude: HarnessDriver = {
     return process.env.CSD_CLAUDE_BIN ?? 'claude';
   },
 
+  workerEnv(
+    controllerEnv: NodeJS.ProcessEnv = process.env,
+  ): Record<string, string> {
+    return claudeWorkerEnv(controllerEnv);
+  },
+
   launchArgv(
     mode: LaunchMode,
     sessionId: string,

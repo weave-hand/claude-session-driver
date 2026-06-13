@@ -45,6 +45,14 @@ export interface HarnessDriver {
   bin(): string;
 
   /**
+   * The env pins for a worker's tmux session, derived from the controller's env.
+   * Harness-specific: claude scrubs stale provider/IDE vars (issue #18); codex/pi
+   * will have their own handling. The launch command expands the returned record
+   * into `-e KEY=VALUE` pairs via `tmux.newSession`/`respawnPane`.
+   */
+  workerEnv(controllerEnv?: NodeJS.ProcessEnv): Record<string, string>;
+
+  /**
    * The full program argv (binary FIRST, so it can be passed straight to
    * `tmux.newSession`) for the given launch `mode`. Harness extra-args (the
    * tokens after `--`) are NOT included here; the launch command appends them.

@@ -65,6 +65,19 @@ describe('claude.bin', () => {
   });
 });
 
+describe('claude.workerEnv', () => {
+  it('delegates to claudeWorkerEnv for the given controller env', () => {
+    expect(claude.workerEnv({})).toEqual(claudeWorkerEnv({}));
+    expect(claude.workerEnv({ CLAUDE_CODE_USE_BEDROCK: '1' })).toEqual(
+      claudeWorkerEnv({ CLAUDE_CODE_USE_BEDROCK: '1' }),
+    );
+  });
+
+  it('always pins CLAUDE_CODE_SSE_PORT empty', () => {
+    expect(claude.workerEnv({}).CLAUDE_CODE_SSE_PORT).toBe('');
+  });
+});
+
 describe('claude.transcriptPath', () => {
   it('encodes cwd and names the file by session id', () => {
     expect(claude.transcriptPath('SID', '/Users/x/p', '/home')).toBe(

@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { type ExecFileException, execFile } from 'node:child_process';
 
 export type RunResult = { stdout: string; stderr: string; code: number };
 
@@ -24,9 +24,9 @@ export const run: Runner = (cmd, args) =>
           resolve({ stdout, stderr, code: 0 });
           return;
         }
-        const errCode = (err as NodeJS.ErrnoException & { code?: number }).code;
+        const errCode = (err as ExecFileException).code;
         const code = typeof errCode === 'number' ? errCode : 1;
-        resolve({ stdout: stdout ?? '', stderr: stderr ?? String(err), code });
+        resolve({ stdout: stdout ?? '', stderr: stderr || String(err), code });
       },
     );
   });

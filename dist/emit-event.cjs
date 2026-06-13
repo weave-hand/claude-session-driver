@@ -105,7 +105,7 @@ function buildEvent(event, ts, payload) {
         event,
         ts,
         tool: asString(payload.tool_name),
-        tool_input: toolInput === void 0 ? {} : toolInput
+        tool_input: typeof toolInput === "object" && toolInput !== null ? toolInput : {}
       };
     }
     case "post_tool_use":

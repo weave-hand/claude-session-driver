@@ -59,11 +59,11 @@ function asString(v: unknown): string {
  * Pure hook logic: parse the payload, append a WorkerEvent if this is a managed
  * worker session with a recognized event, and report what to print on stdout.
  *
- * Never throws on bad input — empty/invalid JSON, missing session_id, missing
- * meta, or an unrecognized event name all return `{ stdout: '' }` with nothing
- * appended. A non-zero exit on the Stop hook can break session shutdown
- * (issue #15), so the entry point must always exit 0; this function never
- * surfaces an error it could.
+ * Never throws on malformed or unexpected input — empty/invalid JSON, missing
+ * session_id, missing meta, or an unrecognized event name all return
+ * `{ stdout: '' }` with nothing appended. A non-zero exit on the Stop hook can
+ * break session shutdown (issue #15), so the entry point must always exit 0.
+ * (I/O errors such as disk-full from appendFileSync are not suppressed.)
  */
 export function runHook(opts: HookOptions): HookResult {
   const empty: HookResult = { stdout: '' };
@@ -114,7 +114,8 @@ function buildEvent(
         event,
         ts,
         tool: asString(payload.tool_name),
-        tool_input: toolInput === undefined ? {} : toolInput,
+        tool_input:
+          typeof toolInput === 'object' && toolInput !== null ? toolInput : {},
       };
     }
     case 'post_tool_use':

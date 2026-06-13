@@ -131,6 +131,39 @@ describe('runHook — tool use', () => {
     });
   });
 
+  it('coerces non-object tool_input to {} for PreToolUse', () => {
+    const dir = tmpDir();
+    makeWorker(dir);
+    // tool_input is a string — not a valid object; should be coerced to {}
+    const stdin = JSON.stringify({
+      session_id: SID,
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Bash',
+      tool_input: 'oops',
+    });
+    const result = run(stdin, dir);
+    expect(result.appended).toEqual({
+      event: 'pre_tool_use',
+      ts: 'T',
+      tool: 'Bash',
+      tool_input: {},
+    });
+    // Also verify null is coerced to {}
+    const stdin2 = JSON.stringify({
+      session_id: SID,
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Bash',
+      tool_input: null,
+    });
+    const result2 = run(stdin2, dir);
+    expect(result2.appended).toEqual({
+      event: 'pre_tool_use',
+      ts: 'T',
+      tool: 'Bash',
+      tool_input: {},
+    });
+  });
+
   it('records only tool for PostToolUse (no tool_input)', () => {
     const dir = tmpDir();
     makeWorker(dir);

@@ -4,12 +4,12 @@
  */
 
 import { claude } from './claude.js';
-import type { HarnessDriver } from './driver.js';
+import type { HarnessDriver, HarnessId } from './driver.js';
 
-const DRIVERS: Record<string, HarnessDriver> = { claude };
+const DRIVERS: Partial<Record<HarnessId, HarnessDriver>> = { claude };
 
 export function getDriver(id: string): HarnessDriver {
-  const driver = DRIVERS[id];
+  const driver = DRIVERS[id as HarnessId];
   if (!driver) {
     throw new Error(
       `Unknown harness '${id}'. Available: ${Object.keys(DRIVERS).join(', ')}`,

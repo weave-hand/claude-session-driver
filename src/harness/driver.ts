@@ -22,9 +22,12 @@ import type { NormalizedTurn } from '../core/transcript.js';
  */
 export type LaunchMode = 'launch' | 'adopt';
 
+/** All supported harness identifiers. Extend here as new harnesses land. */
+export type HarnessId = 'claude' | 'codex' | 'pi';
+
 export interface HarnessDriver {
   /** Stable harness identifier. */
-  id: 'claude' | 'codex' | 'pi';
+  id: HarnessId;
 
   /** How worker events reach the JSONL event sink. */
   controlPlane: 'hooks' | 'extension';
@@ -45,6 +48,11 @@ export interface HarnessDriver {
    * The full program argv (binary FIRST, so it can be passed straight to
    * `tmux.newSession`) for the given launch `mode`. Harness extra-args (the
    * tokens after `--`) are NOT included here; the launch command appends them.
+   *
+   * `cwd`/`workerHome` are part of the uniform signature for harnesses that
+   * embed them in their argv (e.g. a future codex --workdir); claude ignores
+   * them (its tmux session is created in the right cwd by the launch command,
+   * and HOME is set via env).
    */
   launchArgv(
     mode: LaunchMode,

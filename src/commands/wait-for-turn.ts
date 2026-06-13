@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
+import { readRawLines } from '../core/event-log.js';
 import { eventsPath } from '../core/paths.js';
 import { resolveSession } from '../core/worker-store.js';
 import { parseEvent } from '../events.js';
@@ -7,7 +8,7 @@ import type { CommandContext, CommandResult } from './context.js';
 export interface WaitForTurnOpts {
   /** Timeout in SECONDS (default 60). */
   timeout?: number;
-  /** Only consider event lines AFTER this 1-based line number (default 0). */
+  /** Number of lines to skip at the start of the file (default 0 = consider all lines). */
   afterLine?: number;
   /** Poll interval in ms (default 500). Small values keep tests fast. */
   pollMs?: number;
@@ -15,13 +16,6 @@ export interface WaitForTurnOpts {
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((r) => setTimeout(r, ms));
-
-/** Read the raw, non-empty JSONL lines of an events file. */
-function readRawLines(file: string): string[] {
-  return readFileSync(file, 'utf8')
-    .split('\n')
-    .filter((line) => line.length > 0);
-}
 
 const isTurnEnd = (line: string): boolean => {
   const e = parseEvent(line)?.event;

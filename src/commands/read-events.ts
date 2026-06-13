@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
+import { readRawLines } from '../core/event-log.js';
 import { eventsPath } from '../core/paths.js';
 import { resolveSession } from '../core/worker-store.js';
 import { EVENT_NAMES, type EventName, parseEvent } from '../events.js';
@@ -7,14 +8,6 @@ import type { CommandContext, CommandResult } from './context.js';
 export interface ReadEventsOpts {
   last?: number;
   type?: string;
-  follow?: boolean;
-}
-
-/** Read the raw, non-empty JSONL lines of an events file. */
-function readRawLines(file: string): string[] {
-  return readFileSync(file, 'utf8')
-    .split('\n')
-    .filter((line) => line.length > 0);
 }
 
 /** Keep only the raw lines whose parsed `.event` equals `type`. */

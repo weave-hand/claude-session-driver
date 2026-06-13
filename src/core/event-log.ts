@@ -9,6 +9,14 @@ export type WorkerStatus =
   | 'gone'
   | 'unknown';
 
+/** Read the raw, non-empty JSONL lines of an events file. Returns [] if the file does not exist. */
+export function readRawLines(file: string): string[] {
+  if (!existsSync(file)) return [];
+  return readFileSync(file, 'utf8')
+    .split('\n')
+    .filter((line) => line.length > 0);
+}
+
 export function appendEvent(file: string, e: WorkerEvent): void {
   appendFileSync(file, `${serializeEvent(e)}\n`);
 }

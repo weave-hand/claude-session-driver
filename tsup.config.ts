@@ -30,5 +30,6 @@ export default defineConfig([
     splitting: false,
     format: ['esm'],
     outExtension: () => ({ js: '.mjs' }),
+    treeshake: true,
   },
 ]);

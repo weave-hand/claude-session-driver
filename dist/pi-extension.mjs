@@ -1,8 +1,7 @@
-// src/pi-extension/index.ts
-import { existsSync as existsSync4 } from "fs";
+import { existsSync, mkdirSync, writeFileSync, appendFileSync } from 'fs';
+import 'path';
 
-// src/core/event-log.ts
-import { appendFileSync, existsSync, readFileSync } from "fs";
+// src/pi-extension/index.ts
 
 // src/events.ts
 function serializeEvent(e) {
@@ -14,9 +13,6 @@ function appendEvent(file, e) {
   appendFileSync(file, `${serializeEvent(e)}
 `);
 }
-
-// src/core/paths.ts
-import { existsSync as existsSync2, symlinkSync } from "fs";
 function eventsPath(dir, sid) {
   return `${dir}/${sid}.events.jsonl`;
 }
@@ -28,18 +24,6 @@ function metaPath(dir, sid) {
 function isoSecondsUtc(date = /* @__PURE__ */ new Date()) {
   return date.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
-
-// src/core/worker-store.ts
-import {
-  chmodSync,
-  existsSync as existsSync3,
-  mkdirSync,
-  readdirSync,
-  readFileSync as readFileSync2,
-  rmSync,
-  writeFileSync
-} from "fs";
-import { dirname } from "path";
 function writeMeta(dir, meta) {
   mkdirSync(dir, { recursive: true });
   writeFileSync(metaPath(dir, meta.session_id), JSON.stringify(meta));
@@ -56,7 +40,7 @@ function record(ctx, e) {
     if (dir === null) return;
     const sid = ctx.sessionManager.getSessionId();
     if (sid.length === 0) return;
-    if (!existsSync4(metaPath(dir, sid))) {
+    if (!existsSync(metaPath(dir, sid))) {
       const transcriptPath = ctx.sessionManager.getSessionFile();
       writeMeta(dir, {
         tmux_name: process.env.CSD_TMUX_NAME ?? "",
@@ -101,6 +85,5 @@ function csdPiExtension(pi) {
     record(ctx, { event: "session_end", ts: isoSecondsUtc() });
   });
 }
-export {
-  csdPiExtension as default
-};
+
+export { csdPiExtension as default };

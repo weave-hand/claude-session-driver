@@ -21,6 +21,8 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var cli_exports = {};
 __export(cli_exports, {
   followStream: () => followStream,
+  grantConsentConfirm: () => grantConsentConfirm,
+  readLine: () => readLine,
   run: () => run2
 });
 module.exports = __toCommonJS(cli_exports);
@@ -1923,14 +1925,15 @@ function bootstrapOpts() {
     csdPath: process.env.CSD_PATH ?? csdEntry
   };
 }
-function readLine() {
+function readLine(input = process.stdin) {
   return new Promise((res) => {
-    const rl = (0, import_node_readline.createInterface)({ input: process.stdin });
+    const rl = (0, import_node_readline.createInterface)({ input });
+    let captured = null;
     rl.once("line", (line) => {
+      captured = line.trim();
       rl.close();
-      res(line.trim());
     });
-    rl.once("close", () => res(""));
+    rl.once("close", () => res(captured ?? ""));
   });
 }
 function parseLaunchArgs(argv) {
@@ -2232,9 +2235,9 @@ function followStream(ctx, worker, opts, io, signal) {
     controller.signal
   ).then(() => 0).finally(() => process.off("SIGINT", onSigint));
 }
-async function grantConsentConfirm(io) {
+async function grantConsentConfirm(io, input = process.stdin) {
   io.out("Type 'yes' to grant consent:\n");
-  const reply = await readLine();
+  const reply = await readLine(input);
   return reply === "yes";
 }
 if (typeof require !== "undefined" && typeof module !== "undefined" && require.main === module) {
@@ -2247,5 +2250,7 @@ if (typeof require !== "undefined" && typeof module !== "undefined" && require.m
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   followStream,
+  grantConsentConfirm,
+  readLine,
   run
 });

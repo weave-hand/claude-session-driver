@@ -1,8 +1,14 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { followStream, run } from '../src/cli.js';
+import {
+  followStream,
+  grantConsentConfirm,
+  readLine,
+  run,
+} from '../src/cli.js';
 import type { CommandContext } from '../src/commands/context.js';
 import { appendEvent } from '../src/core/event-log.js';
 import { eventsPath } from '../src/core/paths.js';
@@ -256,6 +262,62 @@ describe('run — validation and dispatch', () => {
     const code = await run(['--worker', 'w', 'send'], io);
     expect(code).toBe(1);
     expect(err()).toContain('Usage: send <prompt-text>');
+  });
+});
+
+describe('readLine — piped (non-TTY) stdin', () => {
+  it('returns the first piped line (the close-races-line bug denied consent)', async () => {
+    const reply = await readLine(Readable.from('yes\n'));
+    expect(reply).toBe('yes');
+  });
+
+  it('trims the piped line', async () => {
+    const reply = await readLine(Readable.from('  yes  \n'));
+    expect(reply).toBe('yes');
+  });
+
+  it('resolves empty string on an empty pipe (no line, just EOF)', async () => {
+    const reply = await readLine(Readable.from(''));
+    expect(reply).toBe('');
+  });
+
+  it('returns a non-yes piped line verbatim', async () => {
+    const reply = await readLine(Readable.from('no\n'));
+    expect(reply).toBe('no');
+  });
+});
+
+describe('grantConsentConfirm — piped (non-TTY) stdin', () => {
+  function makeIo() {
+    const out: string[] = [];
+    return {
+      io: { out: (s: string) => out.push(s), err: () => {} },
+      out: () => out.join(''),
+    };
+  }
+
+  it("grants when 'yes' is piped (echo yes | csd grant-consent)", async () => {
+    const { io } = makeIo();
+    const granted = await grantConsentConfirm(io, Readable.from('yes\n'));
+    expect(granted).toBe(true);
+  });
+
+  it("denies when 'no' is piped", async () => {
+    const { io } = makeIo();
+    const granted = await grantConsentConfirm(io, Readable.from('no\n'));
+    expect(granted).toBe(false);
+  });
+
+  it('denies on an empty pipe', async () => {
+    const { io } = makeIo();
+    const granted = await grantConsentConfirm(io, Readable.from(''));
+    expect(granted).toBe(false);
+  });
+
+  it('prints the prompt before reading', async () => {
+    const { io, out } = makeIo();
+    await grantConsentConfirm(io, Readable.from('yes\n'));
+    expect(out()).toContain("Type 'yes' to grant consent:");
   });
 });
 

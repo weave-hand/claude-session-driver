@@ -208,18 +208,28 @@ function bootstrapOpts(): BootstrapOpts {
 }
 
 /**
- * Read one line from stdin, resolving the trimmed string. On EOF without a line
- * (empty pipe), the readline interface closes and we resolve '' so the caller
- * does not hang forever waiting for a line that never arrives.
+ * Read the first line from `input` (default stdin), resolving the trimmed
+ * string. On EOF without a line (empty pipe), resolves '' so the caller does not
+ * hang forever waiting for a line that never arrives.
+ *
+ * Piped (non-TTY) stdin is the subtle case: readline can emit `'close'` in the
+ * same tick as the buffered `'line'`, and a naive `close -> resolve('')` races
+ * ahead of the line, dropping it — so `echo yes | csd grant-consent` would deny
+ * consent (a parity regression; bash `read -r` reads it fine). We capture the
+ * first line and resolve with whatever we captured on close, so a received line
+ * always wins.
  */
-function readLine(): Promise<string> {
+export function readLine(
+  input: NodeJS.ReadableStream = process.stdin,
+): Promise<string> {
   return new Promise((res) => {
-    const rl = createInterface({ input: process.stdin });
+    const rl = createInterface({ input });
+    let captured: string | null = null;
     rl.once('line', (line) => {
+      captured = line.trim();
       rl.close();
-      res(line.trim());
     });
-    rl.once('close', () => res(''));
+    rl.once('close', () => res(captured ?? ''));
   });
 }
 
@@ -590,12 +600,17 @@ export function followStream(
 }
 
 /**
- * The interactive consent confirm: print the prompt (the command's preamble no
- * longer includes it), read a line from stdin, resolve true iff it is 'yes'.
+ * The interactive consent confirm: print the prompt (the command's preamble is
+ * printed by the command BEFORE this runs), read a line from `input` (default
+ * stdin), resolve true iff it is 'yes'. Works for both an interactive TTY and a
+ * pipe (`echo yes | csd grant-consent`).
  */
-async function grantConsentConfirm(io: Io): Promise<boolean> {
+export async function grantConsentConfirm(
+  io: Io,
+  input: NodeJS.ReadableStream = process.stdin,
+): Promise<boolean> {
   io.out("Type 'yes' to grant consent:\n");
-  const reply = await readLine();
+  const reply = await readLine(input);
   return reply === 'yes';
 }
 

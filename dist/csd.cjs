@@ -914,6 +914,29 @@ async function capture(ctx, tmuxName) {
   }
 }
 
+// src/commands/pi-launch.ts
+var sleep3 = (ms) => new Promise((r) => setTimeout(r, ms));
+var DEFAULT_READY_TIMEOUT_MS2 = 1e4;
+var DEFAULT_READY_POLL_MS2 = 250;
+var PI_READY = /\d+(?:\.\d+)?%\/\d+k|^\s*[>›]/m;
+async function awaitPiReady(ctx, tmuxName, opts = {}) {
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_READY_TIMEOUT_MS2;
+  const pollMs = opts.pollMs ?? DEFAULT_READY_POLL_MS2;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const pane = await capture2(ctx, tmuxName);
+    if (PI_READY.test(pane)) return;
+    await sleep3(pollMs);
+  }
+}
+async function capture2(ctx, tmuxName) {
+  try {
+    return await ctx.tmux.capturePane(tmuxName);
+  } catch {
+    return "";
+  }
+}
+
 // src/commands/launch.ts
 function consentError(csdPath) {
   return {
@@ -1014,6 +1037,11 @@ async function launchDerive(ctx, { driver, tmuxName, cwd, extraArgs, invocation 
     });
     await awaitComposerReady(ctx, tmuxName, {
       timeoutMs: opts.codexReadyTimeoutMs,
+      pollMs: opts.pollMs
+    });
+  } else if (driver.id === "pi") {
+    await awaitPiReady(ctx, tmuxName, {
+      timeoutMs: opts.piReadyTimeoutMs,
       pollMs: opts.pollMs
     });
   }
@@ -1262,7 +1290,7 @@ async function cmdReadTurn(ctx, worker, opts) {
 var ESC = "\x1B";
 var PASTE_START = `${ESC}[200~`;
 var PASTE_END = `${ESC}[201~`;
-var sleep3 = (ms) => new Promise((r) => setTimeout(r, ms));
+var sleep4 = (ms) => new Promise((r) => setTimeout(r, ms));
 function envNumber(name, dflt) {
   const raw = process.env[name];
   if (raw === void 0) return dflt;
@@ -1315,7 +1343,7 @@ async function sendDeriveFirst(ctx, worker, prompt, opts) {
         code: 1
       };
     }
-    await sleep3(registerPollMs);
+    await sleep4(registerPollMs);
     if (Date.now() - sinceEnter >= retryInterval * 1e3) {
       await ctx.tmux.sendEnter(worker);
       sinceEnter = Date.now();
@@ -1348,7 +1376,7 @@ async function confirmSubmission(ctx, tmuxName, eventFile, beforeLine, opts) {
         code: 1
       };
     }
-    await sleep3(pollMs);
+    await sleep4(pollMs);
     if (Date.now() - sinceEnter >= retryInterval * 1e3) {
       await ctx.tmux.sendEnter(tmuxName);
       sinceEnter = Date.now();
@@ -1359,7 +1387,7 @@ async function confirmSubmission(ctx, tmuxName, eventFile, beforeLine, opts) {
 
 // src/commands/wait-for-turn.ts
 var import_node_fs11 = require("fs");
-var sleep4 = (ms) => new Promise((r) => setTimeout(r, ms));
+var sleep5 = (ms) => new Promise((r) => setTimeout(r, ms));
 var isTurnEnd = (line) => {
   const e = parseEvent(line)?.event;
   return e === "stop" || e === "session_end";
@@ -1381,7 +1409,7 @@ async function cmdWaitForTurn(ctx, worker, opts) {
         code: 1
       };
     }
-    await sleep4(pollMs);
+    await sleep5(pollMs);
   }
   let linesChecked = afterLine;
   while (Date.now() < deadline) {
@@ -1393,7 +1421,7 @@ async function cmdWaitForTurn(ctx, worker, opts) {
       }
       linesChecked = lines.length;
     }
-    await sleep4(pollMs);
+    await sleep5(pollMs);
   }
   return {
     stderr: `Timeout waiting for turn (stop or session_end) after ${timeout}s`,
@@ -1402,7 +1430,7 @@ async function cmdWaitForTurn(ctx, worker, opts) {
 }
 
 // src/commands/converse.ts
-var sleep5 = (ms) => new Promise((r) => setTimeout(r, ms));
+var sleep6 = (ms) => new Promise((r) => setTimeout(r, ms));
 function readTranscript(file) {
   return (0, import_node_fs12.existsSync)(file) ? (0, import_node_fs12.readFileSync)(file, "utf8") : "";
 }
@@ -1471,7 +1499,7 @@ csd-diagnostic: ${diagDest}` : "";
         }
       }
     }
-    await sleep5(postPollMs);
+    await sleep6(postPollMs);
   }
   const diag = await dumpDiag("no_assistant_response");
   return {
@@ -1663,7 +1691,7 @@ async function cmdSessionId(ctx, worker) {
 }
 
 // src/commands/stop.ts
-var sleep6 = (ms) => new Promise((r) => setTimeout(r, ms));
+var sleep7 = (ms) => new Promise((r) => setTimeout(r, ms));
 function sawSessionEnd(eventFile) {
   return readRawLines(eventFile).some(
     (line) => parseEvent(line)?.event === "session_end"
@@ -1684,10 +1712,10 @@ async function cmdStop(ctx, worker, opts = {}) {
     const deadline = Date.now() + stopTimeout * 1e3;
     while (Date.now() < deadline) {
       if (sawSessionEnd(eventFile)) {
-        await sleep6(settleMs);
+        await sleep7(settleMs);
         break;
       }
-      await sleep6(pollMs);
+      await sleep7(pollMs);
     }
     if (await ctx.tmux.hasSession(tmuxName)) {
       await ctx.tmux.killSession(tmuxName);

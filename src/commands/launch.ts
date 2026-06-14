@@ -15,6 +15,7 @@ import { getDriver } from '../harness/registry.js';
 import { awaitSessionStart } from './await-start.js';
 import { awaitComposerReady, dismissCodexTrustGate } from './codex-launch.js';
 import type { CommandContext, CommandResult } from './context.js';
+import { awaitPiReady } from './pi-launch.js';
 
 /** The shared bootstrap options launch and adopt both accept. */
 export interface BootstrapOpts {
@@ -36,6 +37,11 @@ export interface BootstrapOpts {
   codexTrustTimeoutMs?: number;
   codexReadyTimeoutMs?: number;
   codexTrustSettleMs?: number;
+  /**
+   * Pi (derive) launch-ready timing override (tests pass tiny values): the
+   * status-bar/composer-ready window. Unused on the claude/codex paths.
+   */
+  piReadyTimeoutMs?: number;
 }
 
 export interface LaunchArgs {
@@ -222,9 +228,10 @@ async function launchAssign(
  * the shim. The meta self-registers on the first prompt; the session id / events
  * file are unknown at launch (shown as placeholders in the panel).
  *
- * Codex additionally runs the trust-gate dismissal and composer-ready wait.
- * Pi skips both (the extension self-registers the meta when pi fires its first
- * event; pi's real launch-ready wait is handled in the extension layer).
+ * Codex additionally runs the trust-gate dismissal and composer-ready wait. Pi
+ * has no trust gate, so it runs only a light status-bar/composer-ready wait
+ * (awaitPiReady) — enough to let the TUI come up before the first send; the meta
+ * still self-registers when pi fires its first event.
  */
 async function launchDerive(
   ctx: CommandContext,
@@ -245,11 +252,12 @@ async function launchDerive(
   ];
   await ctx.tmux.newSession(tmuxName, cwd, env, argv);
 
-  // Codex post-launch (trust-gate + composer) is handled here in the command
-  // layer via dismissCodexTrustGate/awaitComposerReady rather than through
-  // driver.postLaunch, which is a no-op on the codex driver and cannot reach
-  // the tmux pane directly. Pi has no trust gate or composer glyph, so both
-  // are skipped entirely for pi workers.
+  // Per-harness launch-ready waits are handled here in the command layer (they
+  // need the tmux pane, which driver.postLaunch/awaitReady do not receive):
+  //   - codex: dismiss the "Hooks need review" trust gate, then wait for the
+  //     composer glyph.
+  //   - pi: no trust gate, so just a light status-bar/composer-ready wait so the
+  //     TUI is up before the first send (the meta self-registers on first event).
   if (driver.id === 'codex') {
     await dismissCodexTrustGate(ctx, tmuxName, {
       timeoutMs: opts.codexTrustTimeoutMs,
@@ -258,6 +266,11 @@ async function launchDerive(
     });
     await awaitComposerReady(ctx, tmuxName, {
       timeoutMs: opts.codexReadyTimeoutMs,
+      pollMs: opts.pollMs,
+    });
+  } else if (driver.id === 'pi') {
+    await awaitPiReady(ctx, tmuxName, {
+      timeoutMs: opts.piReadyTimeoutMs,
       pollMs: opts.pollMs,
     });
   }

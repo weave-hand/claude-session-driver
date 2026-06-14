@@ -439,3 +439,20 @@ export function renderTurn(
   // ends in `\n`, so the per-output separator adds one more `\n` per chunk.
   return turn.map((item) => `${renderItem(item, opts.full)}\n`).join('');
 }
+
+/**
+ * The assistant's reply text for a parsed turn: the `text` items joined with
+ * newlines. Harness-agnostic — works for any driver's `parseTurn` output, so
+ * converse can extract the reply uniformly across claude/codex/pi (the
+ * claude-only `lastAssistantText` count-gate could not). Empty when the turn has
+ * no assistant text yet (e.g. the transcript has not caught up after `stop`).
+ */
+export function assistantText(turn: NormalizedTurn): string {
+  return turn
+    .filter(
+      (item): item is Extract<TurnItem, { kind: 'text' }> =>
+        item.kind === 'text',
+    )
+    .map((item) => item.text)
+    .join('\n');
+}

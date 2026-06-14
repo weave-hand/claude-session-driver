@@ -1,15 +1,11 @@
 import { existsSync, readFileSync } from 'node:fs';
-import {
-  countAssistantTextMessages,
-  lastAssistantText,
-} from '../core/assistant-text.js';
 import { dumpConverseDiag } from '../core/diagnostics.js';
 import { readRawLines } from '../core/event-log.js';
 import { eventsPath } from '../core/paths.js';
 import type { Runner } from '../core/proc.js';
+import { assistantText, renderTurn } from '../core/transcript.js';
 import type { CommandContext, CommandResult } from './context.js';
 import { resolveWorker } from './context.js';
-import { cmdReadTurn } from './read-turn.js';
 import { cmdSend, type SendOpts } from './send.js';
 import { cmdWaitForTurn } from './wait-for-turn.js';
 
@@ -46,12 +42,16 @@ function readTranscript(file: string): string {
  * Send a prompt to a worker, wait for the turn to finish, and return the
  * worker's reply.
  *
- * Parity port of bash `cmd_converse`. Reuses `cmdSend`, `cmdWaitForTurn`, and
- * (for `--with-turn`) `cmdReadTurn`. Records the assistant-text-message count
- * before sending; after the turn ends, polls the transcript for a NEW assistant
- * text message and returns either the rendered markdown turn (`withTurn`) or the
- * last assistant text. On a wait-for-turn timeout or a no-new-response timeout,
- * dumps a diagnostic when `CSD_CONVERSE_DIAG_FILE` is set.
+ * Parity port of bash `cmd_converse`, made harness-aware. The bash version
+ * detected "did the worker reply?" with claude-only jq counting the assistant
+ * text messages; that recognized neither codex rollouts nor pi sessions, so
+ * converse always timed out for those harnesses. Here the turn-complete signal
+ * is harness-agnostic — `cmdWaitForTurn` blocks on the `stop`/`session_end`
+ * event the worker emits after the prompt — and the reply text is extracted by
+ * driving the worker's transcript through `driver.parseTurn` (the same
+ * normalized turn model `read-turn` renders), then joining the assistant text.
+ * On a wait-for-turn timeout or a no-reply timeout, dumps a diagnostic when
+ * `CSD_CONVERSE_DIAG_FILE` is set.
  */
 export async function cmdConverse(
   ctx: CommandContext,
@@ -78,7 +78,6 @@ export async function cmdConverse(
   const logFile = ctx.driver.transcriptPath(sid, meta.cwd, ctx.home);
   const eventFile = eventsPath(ctx.workerDir, sid);
 
-  const beforeCount = countAssistantTextMessages(readTranscript(logFile));
   const afterLine = readRawLines(eventFile).length;
 
   const sendResult = await cmdSend(ctx, worker, prompt, opts.sendOpts ?? {});
@@ -116,15 +115,18 @@ export async function cmdConverse(
     };
   }
 
+  // The turn ended (wait-for-turn saw a stop/session_end after the prompt). The
+  // transcript may lag the event by a beat, so poll it, parsing the latest turn
+  // through the harness driver until the assistant text is present.
   for (let i = 0; i < postPollCount; i++) {
     const transcript = readTranscript(logFile);
     if (transcript.length > 0) {
-      const afterCount = countAssistantTextMessages(transcript);
-      if (afterCount > beforeCount) {
+      const turn = ctx.driver.parseTurn(transcript);
+      if (turn.length > 0) {
         if (opts.withTurn) {
-          return cmdReadTurn(ctx, worker, { full: false });
+          return { stdout: renderTurn(turn, { full: false }), code: 0 };
         }
-        const response = lastAssistantText(transcript);
+        const response = assistantText(turn);
         if (response.length > 0) {
           return { stdout: response, code: 0 };
         }

@@ -259,3 +259,113 @@ describe('cmdConverse', () => {
     );
   });
 });
+
+// A codex/pi worker registers its transcript_path in the worker meta. The
+// driver's transcriptPath reads it back from the GLOBAL worker dir, so these
+// tests pin CSD_WORKER_DIR to the test's worker dir. These exercise the
+// harness-aware text-extraction path: the count-gate that only recognized the
+// claude transcript shape made converse always time out for codex/pi.
+describe('cmdConverse — codex/pi harness shapes', () => {
+  let workerDir: string;
+  let prevWorkerDir: string | undefined;
+
+  function rolloutPath(): string {
+    return join(workerDir, 'rollout.jsonl');
+  }
+
+  function writeRollout(content: string): void {
+    writeFileSync(rolloutPath(), content);
+  }
+
+  function registerMeta(harness: string): void {
+    writeMeta(workerDir, {
+      tmux_name: TMUX_NAME,
+      session_id: SID,
+      cwd: CWD,
+      harness,
+      transcript_path: rolloutPath(),
+    });
+  }
+
+  beforeEach(() => {
+    workerDir = tmpDir('csd-conv-hx-');
+    prevWorkerDir = process.env.CSD_WORKER_DIR;
+    process.env.CSD_WORKER_DIR = workerDir;
+  });
+
+  afterEach(() => {
+    if (prevWorkerDir === undefined) delete process.env.CSD_WORKER_DIR;
+    else process.env.CSD_WORKER_DIR = prevWorkerDir;
+    rmSync(workerDir, { recursive: true });
+    delete process.env.CSD_CONVERSE_DIAG_FILE;
+  });
+
+  const CODEX_USER =
+    '{"type":"response_item","payload":{"type":"message","role":"user","content":[{"text":"do the thing"}]}}';
+  const CODEX_ASSISTANT =
+    '{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"output_text":"codex says hello"}]}}';
+
+  it('returns the codex assistant text (count-gate used to time out)', async () => {
+    const ef = eventsPath(workerDir, SID);
+    registerMeta('codex');
+    writeRollout(CODEX_USER);
+    const tmux = respondingTmux(ef, () => {
+      writeRollout([CODEX_USER, CODEX_ASSISTANT].join('\n'));
+    });
+    const ctx: CommandContext = {
+      workerDir,
+      home: workerDir,
+      tmux,
+      driver: getDriver('codex'),
+    };
+    const result = await cmdConverse(ctx, SID, 'do the thing', fastOpts);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe('codex says hello');
+  });
+
+  it('--with-turn renders the codex markdown turn', async () => {
+    const ef = eventsPath(workerDir, SID);
+    registerMeta('codex');
+    writeRollout(CODEX_USER);
+    const tmux = respondingTmux(ef, () => {
+      writeRollout([CODEX_USER, CODEX_ASSISTANT].join('\n'));
+    });
+    const ctx: CommandContext = {
+      workerDir,
+      home: workerDir,
+      tmux,
+      driver: getDriver('codex'),
+    };
+    const result = await cmdConverse(ctx, SID, 'do the thing', {
+      ...fastOpts,
+      withTurn: true,
+    });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain('**Prompt:** do the thing');
+    expect(result.stdout).toContain('codex says hello');
+  });
+
+  const PI_HEADER = '{"type":"session","version":3,"id":"s","cwd":"/p"}';
+  const PI_USER =
+    '{"type":"message","message":{"role":"user","content":"do it"}}';
+  const PI_ASSISTANT =
+    '{"type":"message","message":{"role":"assistant","content":[{"type":"text","text":"pi replies"}]}}';
+
+  it('returns the pi assistant text (count-gate used to time out)', async () => {
+    const ef = eventsPath(workerDir, SID);
+    registerMeta('pi');
+    writeRollout([PI_HEADER, PI_USER].join('\n'));
+    const tmux = respondingTmux(ef, () => {
+      writeRollout([PI_HEADER, PI_USER, PI_ASSISTANT].join('\n'));
+    });
+    const ctx: CommandContext = {
+      workerDir,
+      home: workerDir,
+      tmux,
+      driver: getDriver('pi'),
+    };
+    const result = await cmdConverse(ctx, SID, 'do it', fastOpts);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe('pi replies');
+  });
+});

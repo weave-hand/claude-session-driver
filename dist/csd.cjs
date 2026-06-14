@@ -426,6 +426,11 @@ function renderTurn(turn, opts) {
   return turn.map((item) => `${renderItem(item, opts.full)}
 `).join("");
 }
+function assistantText(turn) {
+  return turn.filter(
+    (item) => item.kind === "text"
+  ).map((item) => item.text).join("\n");
+}
 
 // src/harness/claude.ts
 var CLAUDE_PROVIDER_ENV_VARS = [
@@ -1120,40 +1125,7 @@ async function cmdAdopt(ctx, args, opts) {
 }
 
 // src/commands/converse.ts
-var import_node_fs12 = require("fs");
-
-// src/core/assistant-text.ts
-function asBlock2(x) {
-  return typeof x === "object" && x !== null ? x : null;
-}
-function assistantTextLines(jsonl) {
-  const out = [];
-  for (const line of jsonl.split("\n")) {
-    if (line.length === 0) continue;
-    let parsed;
-    try {
-      parsed = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (parsed.type !== "assistant") continue;
-    const content = parsed.message?.content;
-    if (!Array.isArray(content)) continue;
-    if (content.some((b) => asBlock2(b)?.type === "text")) {
-      out.push(content);
-    }
-  }
-  return out;
-}
-function countAssistantTextMessages(jsonl) {
-  return assistantTextLines(jsonl).length;
-}
-function lastAssistantText(jsonl) {
-  const lines = assistantTextLines(jsonl);
-  const last = lines.at(-1);
-  if (last === void 0) return "";
-  return last.map((b) => asBlock2(b)).filter((b) => b?.type === "text").map((b) => typeof b.text === "string" ? b.text : "").join("\n");
-}
+var import_node_fs11 = require("fs");
 
 // src/core/diagnostics.ts
 var import_node_fs9 = require("fs");
@@ -1263,29 +1235,6 @@ function resolveWorker(ctx, worker) {
   return { sid, meta };
 }
 
-// src/commands/read-turn.ts
-var import_node_fs10 = require("fs");
-async function cmdReadTurn(ctx, worker, opts) {
-  const resolved = resolveWorker(ctx, worker);
-  if ("code" in resolved) return resolved;
-  const { sid, meta } = resolved;
-  if (!meta.cwd) {
-    return {
-      stderr: "Error: Could not determine working directory from meta file",
-      code: 1
-    };
-  }
-  const logFile = ctx.driver.transcriptPath(sid, meta.cwd, ctx.home);
-  if (!(0, import_node_fs10.existsSync)(logFile)) {
-    return { stderr: `Error: Session log not found at ${logFile}`, code: 1 };
-  }
-  const turn = ctx.driver.parseTurn((0, import_node_fs10.readFileSync)(logFile, "utf8"));
-  if (turn.length === 0) {
-    return { stderr: "No user prompt found in session log", code: 1 };
-  }
-  return { stdout: renderTurn(turn, { full: opts.full ?? false }), code: 0 };
-}
-
 // src/commands/send.ts
 var ESC = "\x1B";
 var PASTE_START = `${ESC}[200~`;
@@ -1386,7 +1335,7 @@ async function confirmSubmission(ctx, tmuxName, eventFile, beforeLine, opts) {
 }
 
 // src/commands/wait-for-turn.ts
-var import_node_fs11 = require("fs");
+var import_node_fs10 = require("fs");
 var sleep5 = (ms) => new Promise((r) => setTimeout(r, ms));
 var isTurnEnd = (line) => {
   const e = parseEvent(line)?.event;
@@ -1402,7 +1351,7 @@ async function cmdWaitForTurn(ctx, worker, opts) {
   }
   const eventFile = eventsPath(ctx.workerDir, sid);
   const deadline = Date.now() + timeout * 1e3;
-  while (!(0, import_node_fs11.existsSync)(eventFile)) {
+  while (!(0, import_node_fs10.existsSync)(eventFile)) {
     if (Date.now() >= deadline) {
       return {
         stderr: `Timeout waiting for event file: ${eventFile}`,
@@ -1432,7 +1381,7 @@ async function cmdWaitForTurn(ctx, worker, opts) {
 // src/commands/converse.ts
 var sleep6 = (ms) => new Promise((r) => setTimeout(r, ms));
 function readTranscript(file) {
-  return (0, import_node_fs12.existsSync)(file) ? (0, import_node_fs12.readFileSync)(file, "utf8") : "";
+  return (0, import_node_fs11.existsSync)(file) ? (0, import_node_fs11.readFileSync)(file, "utf8") : "";
 }
 async function cmdConverse(ctx, worker, prompt, opts) {
   const resolved = resolveWorker(ctx, worker);
@@ -1450,7 +1399,6 @@ async function cmdConverse(ctx, worker, prompt, opts) {
   const now = opts.now ?? (() => (/* @__PURE__ */ new Date()).toISOString());
   const logFile = ctx.driver.transcriptPath(sid, meta.cwd, ctx.home);
   const eventFile = eventsPath(ctx.workerDir, sid);
-  const beforeCount = countAssistantTextMessages(readTranscript(logFile));
   const afterLine = readRawLines(eventFile).length;
   const sendResult = await cmdSend(ctx, worker, prompt, opts.sendOpts ?? {});
   if (sendResult.code !== 0) return sendResult;
@@ -1488,12 +1436,12 @@ csd-diagnostic: ${diagDest}` : "";
   for (let i = 0; i < postPollCount; i++) {
     const transcript = readTranscript(logFile);
     if (transcript.length > 0) {
-      const afterCount = countAssistantTextMessages(transcript);
-      if (afterCount > beforeCount) {
+      const turn = ctx.driver.parseTurn(transcript);
+      if (turn.length > 0) {
         if (opts.withTurn) {
-          return cmdReadTurn(ctx, worker, { full: false });
+          return { stdout: renderTurn(turn, { full: false }), code: 0 };
         }
-        const response = lastAssistantText(transcript);
+        const response = assistantText(turn);
         if (response.length > 0) {
           return { stdout: response, code: 0 };
         }
@@ -1566,13 +1514,13 @@ the session.
 }
 
 // src/commands/status.ts
-var import_node_fs13 = require("fs");
+var import_node_fs12 = require("fs");
 async function computeStatus(ctx, meta) {
   if (!await ctx.tmux.hasSession(meta.tmux_name)) {
     return "gone";
   }
   const ef = eventsPath(ctx.workerDir, meta.session_id);
-  if (!(0, import_node_fs13.existsSync)(ef)) {
+  if (!(0, import_node_fs12.existsSync)(ef)) {
     return "unknown";
   }
   const last = lastEvent(ef);
@@ -1626,7 +1574,7 @@ async function cmdList(ctx, opts) {
 }
 
 // src/commands/read-events.ts
-var import_node_fs14 = require("fs");
+var import_node_fs13 = require("fs");
 function filterByType(lines, type) {
   return lines.filter((line) => parseEvent(line)?.event === type);
 }
@@ -1645,7 +1593,7 @@ async function cmdReadEvents(ctx, worker, opts) {
     return { stderr: `Error: no worker known as '${worker}'`, code: 1 };
   }
   const eventFile = eventsPath(ctx.workerDir, sid);
-  if (!(0, import_node_fs14.existsSync)(eventFile)) {
+  if (!(0, import_node_fs13.existsSync)(eventFile)) {
     return { stderr: `Error: No event file for session ${sid}`, code: 1 };
   }
   let lines = readRawLines(eventFile);
@@ -1665,7 +1613,7 @@ async function followEvents(ctx, worker, opts, sink, signal) {
   let emitted = 0;
   for (; ; ) {
     if (signal?.aborted) return;
-    if ((0, import_node_fs14.existsSync)(eventFile)) {
+    if ((0, import_node_fs13.existsSync)(eventFile)) {
       const lines = readRawLines(eventFile);
       for (const line of lines.slice(emitted)) {
         if (opts.type === void 0 || parseEvent(line)?.event === opts.type) {
@@ -1676,6 +1624,29 @@ async function followEvents(ctx, worker, opts, sink, signal) {
     }
     await new Promise((r) => setTimeout(r, pollMs));
   }
+}
+
+// src/commands/read-turn.ts
+var import_node_fs14 = require("fs");
+async function cmdReadTurn(ctx, worker, opts) {
+  const resolved = resolveWorker(ctx, worker);
+  if ("code" in resolved) return resolved;
+  const { sid, meta } = resolved;
+  if (!meta.cwd) {
+    return {
+      stderr: "Error: Could not determine working directory from meta file",
+      code: 1
+    };
+  }
+  const logFile = ctx.driver.transcriptPath(sid, meta.cwd, ctx.home);
+  if (!(0, import_node_fs14.existsSync)(logFile)) {
+    return { stderr: `Error: Session log not found at ${logFile}`, code: 1 };
+  }
+  const turn = ctx.driver.parseTurn((0, import_node_fs14.readFileSync)(logFile, "utf8"));
+  if (turn.length === 0) {
+    return { stderr: "No user prompt found in session log", code: 1 };
+  }
+  return { stdout: renderTurn(turn, { full: opts.full ?? false }), code: 0 };
 }
 
 // src/commands/session-id.ts

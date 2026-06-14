@@ -38,19 +38,11 @@ const CLAUDE_PROVIDER_ENV_VARS = [
  * `CLAUDE_CODE_SSE_PORT` is always pinned empty: it is the IDE socket port, only
  * ever a UI channel and never an auth channel, so a headless worker must not
  * auto-connect to the controller's IDE socket.
- *
- * `IS_DEMO` is pinned to `1` so a fresh `--session-id` worker skips first-run
- * onboarding — specifically the terminal-scoped theme picker, which re-prompts
- * on every new session id regardless of global `hasCompletedOnboarding`, and
- * otherwise stalls the worker before `session_start` (issue #11).
  */
 export function claudeWorkerEnv(
   controllerEnv: NodeJS.ProcessEnv = process.env,
 ): Record<string, string> {
-  const env: Record<string, string> = {
-    CLAUDE_CODE_SSE_PORT: '',
-    IS_DEMO: '1',
-  };
+  const env: Record<string, string> = { CLAUDE_CODE_SSE_PORT: '' };
   for (const name of CLAUDE_PROVIDER_ENV_VARS) {
     if (!controllerEnv[name]) env[name] = '';
   }

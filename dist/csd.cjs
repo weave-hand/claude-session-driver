@@ -451,10 +451,7 @@ var CLAUDE_PROVIDER_ENV_VARS = [
   "CLAUDE_CODE_USE_MANTLE"
 ];
 function claudeWorkerEnv(controllerEnv = process.env) {
-  const env = {
-    CLAUDE_CODE_SSE_PORT: "",
-    IS_DEMO: "1"
-  };
+  const env = { CLAUDE_CODE_SSE_PORT: "" };
   for (const name of CLAUDE_PROVIDER_ENV_VARS) {
     if (!controllerEnv[name]) env[name] = "";
   }

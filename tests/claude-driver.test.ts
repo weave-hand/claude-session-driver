@@ -99,7 +99,6 @@ describe('claudeWorkerEnv', () => {
     const env = claudeWorkerEnv({});
     expect(env).toEqual({
       CLAUDE_CODE_SSE_PORT: '',
-      IS_DEMO: '1',
       CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: '',
       CLAUDE_CODE_USE_BEDROCK: '',
       CLAUDE_CODE_USE_VERTEX: '',
@@ -107,14 +106,6 @@ describe('claudeWorkerEnv', () => {
       CLAUDE_CODE_USE_ANTHROPIC_AWS: '',
       CLAUDE_CODE_USE_MANTLE: '',
     });
-  });
-
-  it('pins IS_DEMO=1 to skip the first-run theme picker that stalls fresh workers (issue #11)', () => {
-    // Verified live: without this pin a real `claude --session-id <fresh>` worker
-    // stalls on the terminal-scoped theme picker and never emits session_start,
-    // regardless of global hasCompletedOnboarding.
-    expect(claudeWorkerEnv({}).IS_DEMO).toBe('1');
-    expect(claudeWorkerEnv({ CLAUDE_CODE_USE_BEDROCK: '1' }).IS_DEMO).toBe('1');
   });
 
   it('omits a provider var the controller has a non-empty value for', () => {

@@ -6,8 +6,13 @@
 import { claude } from './claude.js';
 import { codex } from './codex.js';
 import type { HarnessDriver, HarnessId } from './driver.js';
+import { pi } from './pi.js';
 
-const DRIVERS: Partial<Record<HarnessId, HarnessDriver>> = { claude, codex };
+const DRIVERS: Partial<Record<HarnessId, HarnessDriver>> = {
+  claude,
+  codex,
+  pi,
+};
 
 export function getDriver(id: string): HarnessDriver {
   const driver = DRIVERS[id as HarnessId];

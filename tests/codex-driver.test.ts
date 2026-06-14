@@ -78,12 +78,16 @@ describe('codex.launchArgv', () => {
 });
 
 describe('codex.workerEnv', () => {
-  it('sets CODEX_HOME to the worker home', () => {
-    expect(codex.workerEnv('/tmp/wh', {})).toEqual({ CODEX_HOME: '/tmp/wh' });
+  it('sets CODEX_HOME to the worker home (ignoring tmuxName)', () => {
+    expect(codex.workerEnv('/tmp/wh', 'w1', {})).toEqual({
+      CODEX_HOME: '/tmp/wh',
+    });
   });
 
   it('delegates to codexWorkerEnv', () => {
-    expect(codex.workerEnv('/tmp/wh', {})).toEqual(codexWorkerEnv('/tmp/wh'));
+    expect(codex.workerEnv('/tmp/wh', 'w1', {})).toEqual(
+      codexWorkerEnv('/tmp/wh'),
+    );
   });
 });
 

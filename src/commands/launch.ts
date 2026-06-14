@@ -185,7 +185,7 @@ async function launchAssign(
     invocation,
   });
 
-  const env = driver.workerEnv(ctx.home, process.env);
+  const env = driver.workerEnv(ctx.home, tmuxName, process.env);
   await driver.prepare(tmuxName, cwd, ctx.home);
 
   const argv = [
@@ -233,7 +233,7 @@ async function launchDerive(
   writeHarnessMarker(ctx.workerDir, tmuxName, driver.id);
 
   const workerHome = deriveWorkerHome(ctx.workerDir, tmuxName);
-  const env = driver.workerEnv(workerHome, process.env);
+  const env = driver.workerEnv(workerHome, tmuxName, process.env);
   await driver.prepare(tmuxName, cwd, workerHome);
 
   const argv = [

@@ -48,15 +48,25 @@ export interface HarnessDriver {
    * The env pins for a worker's tmux session, derived from the controller's env.
    * Harness-specific: claude scrubs stale provider/IDE vars (issue #18); codex
    * pins `CODEX_HOME` to the per-worker home so the worker uses its own
-   * config/auth/sessions dir. The launch command expands the returned record
-   * into `-e KEY=VALUE` pairs via `tmux.newSession`/`respawnPane`.
+   * config/auth/sessions dir; pi pins `PI_CODING_AGENT_DIR` + the
+   * `CSD_WORKER_DIR`/`CSD_TMUX_NAME` its extension reads to self-register the
+   * meta. The launch command expands the returned record into `-e KEY=VALUE`
+   * pairs via `tmux.newSession`/`respawnPane`.
    *
    * `workerHome` is the per-worker home dir (claude: the controller HOME; codex:
-   * the per-worker CODEX_HOME). It is part of the signature because codex's env
-   * genuinely depends on it; claude ignores it.
+   * the per-worker CODEX_HOME; pi: the per-worker PI_CODING_AGENT_DIR). It is
+   * part of the signature because codex/pi's env genuinely depend on it; claude
+   * ignores it.
+   *
+   * `tmuxName` is the worker's tmux window name. Pi's extension is the only
+   * control plane that learns the session id at runtime (derive), so it must
+   * read `CSD_TMUX_NAME` from the env to bake the right name into the meta it
+   * self-registers; claude/codex carry the name via the pre-written meta / hook
+   * args and ignore it.
    */
   workerEnv(
     workerHome: string,
+    tmuxName: string,
     controllerEnv?: NodeJS.ProcessEnv,
   ): Record<string, string>;
 

@@ -265,6 +265,134 @@ export function parseCodexTurn(jsonl: string): NormalizedTurn {
   return turn;
 }
 
+/**
+ * Pi session-transcript parse. The pi session file is JSONL whose line 1 is a
+ * `{"type":"session",...}` HEADER and whose subsequent `{"type":"message",...}`
+ * entries wrap an `AgentMessage` under `entry.message`. Other entry types
+ * (model_change, thinking_level_change, compaction, …) are skipped. Normalized
+ * into the SHARED TurnItem model so `renderTurn` works unchanged (mirrors
+ * parseClaudeTurn/parseCodexTurn).
+ *
+ * Turn start = the last message entry whose `message.role === "user"`; if none,
+ * start from the first message entry. From there each message entry maps:
+ *   role "user"       -> prompt   (content: string OR (text|image)[] joined)
+ *   role "assistant"  -> per content block:
+ *                          text     -> text
+ *                          thinking -> thinking   (text from `.thinking`)
+ *                          toolCall -> tool_use    ({type:"toolCall",name,arguments};
+ *                                                   NOTE: "toolCall", not "toolUse")
+ *   role "toolResult" -> tool_result (content (text|image)[] joined; isError flag)
+ * Parsing is defensive: malformed lines, non-object entries, the header line,
+ * unknown entry types, and missing fields degrade to empty/skip, never throw.
+ */
+
+interface PiEntry {
+  type?: unknown;
+  message?: unknown;
+}
+
+interface PiMessage {
+  role?: unknown;
+  content?: unknown;
+  thinking?: unknown;
+  name?: unknown;
+  arguments?: unknown;
+  isError?: unknown;
+}
+
+function parsePiEntries(jsonl: string): PiEntry[] {
+  const out: PiEntry[] = [];
+  for (const line of jsonl.split('\n')) {
+    if (line.length === 0) continue;
+    try {
+      const parsed: unknown = JSON.parse(line);
+      // Pi session JSONL is always objects, but guard against bare scalars.
+      if (typeof parsed === 'object' && parsed !== null) {
+        out.push(parsed as PiEntry);
+      }
+    } catch {
+      // Real session files can contain partial/garbage lines; skip them.
+    }
+  }
+  return out;
+}
+
+/** The inner AgentMessage of a `type:"message"` entry, or null otherwise. */
+function asPiMessage(entry: PiEntry): PiMessage | null {
+  if (entry.type !== 'message') return null;
+  const m = entry.message;
+  return typeof m === 'object' && m !== null ? (m as PiMessage) : null;
+}
+
+/**
+ * Join a pi message `content` into a single string: a bare string passes
+ * through; an array joins its `{type:"text",text}` blocks (image/other blocks
+ * contribute nothing).
+ */
+function piContentText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return (content as unknown[])
+    .map((raw) => {
+      const block = asBlock(raw);
+      if (block?.type !== 'text') return '';
+      return typeof block.text === 'string' ? block.text : '';
+    })
+    .join('');
+}
+
+/** Index of the last user `message` entry, or 0 to start from the first one. */
+function findPiBoundary(entries: PiEntry[]): number {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const m = asPiMessage(entries[i] as PiEntry);
+    if (m && m.role === 'user') return i;
+  }
+  return 0;
+}
+
+function collectPiAssistant(content: unknown, out: NormalizedTurn): void {
+  if (!Array.isArray(content)) return;
+  for (const raw of content as unknown[]) {
+    const block = asBlock(raw);
+    if (!block) continue;
+    if (block.type === 'thinking') {
+      const text = typeof block.thinking === 'string' ? block.thinking : '';
+      out.push({ kind: 'thinking', text });
+    } else if (block.type === 'text') {
+      const text = typeof block.text === 'string' ? block.text : '';
+      out.push({ kind: 'text', text });
+    } else if (block.type === 'toolCall') {
+      const piBlock = block as PiMessage;
+      const name = typeof piBlock.name === 'string' ? piBlock.name : '';
+      out.push({ kind: 'tool_use', name, input: piBlock.arguments });
+    }
+  }
+}
+
+export function parsePiTurn(jsonl: string): NormalizedTurn {
+  const entries = parsePiEntries(jsonl);
+  if (entries.length === 0) return [];
+  const boundary = findPiBoundary(entries);
+
+  const turn: NormalizedTurn = [];
+  for (const entry of entries.slice(boundary)) {
+    const m = asPiMessage(entry);
+    if (!m) continue;
+    if (m.role === 'user') {
+      turn.push({ kind: 'prompt', text: piContentText(m.content) });
+    } else if (m.role === 'assistant') {
+      collectPiAssistant(m.content, turn);
+    } else if (m.role === 'toolResult') {
+      turn.push({
+        kind: 'tool_result',
+        content: piContentText(m.content),
+        isError: Boolean(m.isError),
+      });
+    }
+  }
+  return turn;
+}
+
 /** Compact JSON for an object; the raw string for a string (jq `tostring`). */
 function compactJson(input: unknown): string {
   if (typeof input === 'string') return input;

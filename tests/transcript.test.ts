@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { parseClaudeTurn, renderTurn } from '../src/core/transcript.js';
+import {
+  parseClaudeTurn,
+  parsePiTurn,
+  renderTurn,
+} from '../src/core/transcript.js';
 
 describe('parseClaudeTurn / renderTurn', () => {
   it('renders the last turn with truncated tool result', () => {
@@ -186,5 +190,241 @@ describe('parseClaudeTurn / renderTurn', () => {
     // Only the boundary prompt contributes; the numeric-content lines add nothing.
     expect(turn.filter((i) => i.kind === 'prompt')).toHaveLength(1);
     expect(md).toBe('---\n\n**Prompt:** go\n\n');
+  });
+});
+
+describe('parsePiTurn / renderTurn', () => {
+  /** A pi session header line (entry type "session"). */
+  const header = JSON.stringify({
+    type: 'session',
+    version: 3,
+    id: 'sess-uuid',
+    timestamp: '2026-06-13T00:00:00.000Z',
+    cwd: '/proj',
+  });
+
+  /** A pi message entry wrapping an AgentMessage. */
+  const msg = (message: unknown, id = 'abc12345') =>
+    JSON.stringify({
+      type: 'message',
+      id,
+      parentId: null,
+      timestamp: '2026-06-13T00:00:01.000Z',
+      message,
+    });
+
+  const userStr = (text: string) => msg({ role: 'user', content: text });
+  const userArr = (text: string) =>
+    msg({ role: 'user', content: [{ type: 'text', text }] });
+  const assistant = (content: unknown[], stopReason = 'stop') =>
+    msg({ role: 'assistant', content, stopReason });
+  const toolResult = (text: string, isError = false) =>
+    msg({
+      role: 'toolResult',
+      toolCallId: 'call_1',
+      toolName: 'read',
+      content: [{ type: 'text', text }],
+      isError,
+    });
+
+  it('parses a full pi turn into the normalized items', () => {
+    const session = [
+      header,
+      assistant([{ type: 'text', text: 'earlier turn, ignored' }]),
+      userStr('do the thing'),
+      assistant([
+        { type: 'thinking', thinking: 'let me think' },
+        { type: 'text', text: 'here is my answer' },
+        {
+          type: 'toolCall',
+          id: 'call_1',
+          name: 'read',
+          arguments: { path: '/x' },
+        },
+      ]),
+      toolResult('file contents'),
+    ].join('\n');
+
+    const turn = parsePiTurn(session);
+    expect(turn).toEqual([
+      { kind: 'prompt', text: 'do the thing' },
+      { kind: 'thinking', text: 'let me think' },
+      { kind: 'text', text: 'here is my answer' },
+      { kind: 'tool_use', name: 'read', input: { path: '/x' } },
+      { kind: 'tool_result', content: 'file contents', isError: false },
+    ]);
+  });
+
+  it('treats an array-content user message as the prompt boundary', () => {
+    const session = [
+      header,
+      userArr('the prompt'),
+      assistant([{ type: 'text', text: 'reply' }]),
+    ].join('\n');
+    expect(parsePiTurn(session)).toEqual([
+      { kind: 'prompt', text: 'the prompt' },
+      { kind: 'text', text: 'reply' },
+    ]);
+  });
+
+  it('renders the normalized turn with the shared renderer', () => {
+    const session = [
+      header,
+      userStr('do it'),
+      assistant([
+        { type: 'thinking', thinking: 'hmm' },
+        { type: 'text', text: 'ok' },
+        { type: 'toolCall', id: 'c', name: 'bash', arguments: { cmd: 'ls' } },
+      ]),
+      toolResult('out'),
+    ].join('\n');
+    const md = renderTurn(parsePiTurn(session), { full: true });
+    expect(md).toContain('**Prompt:** do it');
+    expect(md).toContain('> **Thinking:** hmm');
+    expect(md).toContain('ok');
+    expect(md).toContain('**Tool: bash**');
+    expect(md).toContain('```json\n{"cmd":"ls"}\n```');
+    expect(md).toContain('**Result:**');
+    expect(md).toContain('out');
+  });
+
+  it('skips the session header line (it is never a boundary or item)', () => {
+    const session = [header, assistant([{ type: 'text', text: 'hello' }])].join(
+      '\n',
+    );
+    const turn = parsePiTurn(session);
+    expect(turn).toEqual([{ kind: 'text', text: 'hello' }]);
+  });
+
+  it('starts from the first message when there is no user message', () => {
+    const session = [
+      header,
+      assistant([{ type: 'text', text: 'hello' }]),
+      toolResult('result'),
+    ].join('\n');
+    expect(parsePiTurn(session)).toEqual([
+      { kind: 'text', text: 'hello' },
+      { kind: 'tool_result', content: 'result', isError: false },
+    ]);
+  });
+
+  it('finds the LAST user message as the turn boundary', () => {
+    const session = [
+      header,
+      userStr('first prompt'),
+      assistant([{ type: 'text', text: 'first reply' }]),
+      userStr('second prompt'),
+      assistant([{ type: 'text', text: 'second reply' }]),
+    ].join('\n');
+    const turn = parsePiTurn(session);
+    expect(turn).toEqual([
+      { kind: 'prompt', text: 'second prompt' },
+      { kind: 'text', text: 'second reply' },
+    ]);
+  });
+
+  it('skips unknown entry types (model_change, thinking_level_change)', () => {
+    const session = [
+      header,
+      userStr('go'),
+      JSON.stringify({ type: 'model_change', model: 'x' }),
+      JSON.stringify({ type: 'thinking_level_change', level: 'high' }),
+      assistant([{ type: 'text', text: 'done' }]),
+    ].join('\n');
+    expect(parsePiTurn(session)).toEqual([
+      { kind: 'prompt', text: 'go' },
+      { kind: 'text', text: 'done' },
+    ]);
+  });
+
+  it('skips malformed and non-object lines without throwing', () => {
+    const session = [
+      header,
+      'not json at all',
+      '42',
+      'null',
+      userStr('go'),
+      '{"type":"message"}',
+      assistant([{ type: 'text', text: 'done' }]),
+    ].join('\n');
+    expect(parsePiTurn(session)).toEqual([
+      { kind: 'prompt', text: 'go' },
+      { kind: 'text', text: 'done' },
+    ]);
+  });
+
+  it('renders an isError toolResult as Tool Error', () => {
+    const session = [header, userStr('go'), toolResult('boom', true)].join(
+      '\n',
+    );
+    const turn = parsePiTurn(session);
+    expect(turn).toContainEqual({
+      kind: 'tool_result',
+      content: 'boom',
+      isError: true,
+    });
+    const md = renderTurn(turn, { full: false });
+    expect(md).toContain('**Tool Error:**');
+    expect(md).not.toContain('**Result:**');
+  });
+
+  it('joins multiple text blocks of a user array prompt', () => {
+    const session = [
+      header,
+      msg({
+        role: 'user',
+        content: [
+          { type: 'text', text: 'part one ' },
+          { type: 'text', text: 'part two' },
+        ],
+      }),
+    ].join('\n');
+    expect(parsePiTurn(session)).toEqual([
+      { kind: 'prompt', text: 'part one part two' },
+    ]);
+  });
+
+  it('ignores non-text (image) blocks when joining content', () => {
+    const session = [
+      header,
+      userStr('go'),
+      assistant([
+        { type: 'text', text: 'visible' },
+        { type: 'image', source: 'data:...' },
+      ]),
+    ].join('\n');
+    expect(parsePiTurn(session)).toEqual([
+      { kind: 'prompt', text: 'go' },
+      { kind: 'text', text: 'visible' },
+    ]);
+  });
+
+  it('renders a thinking block with no thinking field as empty, not "undefined"', () => {
+    const session = [
+      header,
+      userStr('go'),
+      assistant([{ type: 'thinking' }]),
+    ].join('\n');
+    const md = renderTurn(parsePiTurn(session), { full: false });
+    expect(md).not.toContain('undefined');
+  });
+
+  it('renders a toolCall with no name as an empty name, not "undefined"', () => {
+    const session = [
+      header,
+      userStr('go'),
+      assistant([{ type: 'toolCall', id: 'c', arguments: {} }]),
+    ].join('\n');
+    const md = renderTurn(parsePiTurn(session), { full: false });
+    expect(md).toContain('**Tool: **');
+    expect(md).not.toContain('undefined');
+  });
+
+  it('returns [] for empty input', () => {
+    expect(parsePiTurn('')).toEqual([]);
+  });
+
+  it('returns [] for a header-only session', () => {
+    expect(parsePiTurn(header)).toEqual([]);
   });
 });

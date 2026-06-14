@@ -61,8 +61,10 @@ export const claude: HarnessDriver = {
 
   // Claude's worker HOME is the controller HOME, so `workerHome` is ignored;
   // the param exists because codex's env depends on its per-worker CODEX_HOME.
+  // `tmuxName` is ignored: claude carries its name in the pre-written meta.
   workerEnv(
     _workerHome: string,
+    _tmuxName: string,
     controllerEnv: NodeJS.ProcessEnv = process.env,
   ): Record<string, string> {
     return claudeWorkerEnv(controllerEnv);

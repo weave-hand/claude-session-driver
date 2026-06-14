@@ -143,9 +143,12 @@ export const codex: HarnessDriver = {
   },
 
   // CODEX_HOME is per-worker, so the env genuinely depends on workerHome (unlike
-  // claude). controllerEnv is unused: codex pins only CODEX_HOME.
+  // claude). `tmuxName` is ignored: codex bakes its name into the hook command
+  // args (see prepare), not the env. controllerEnv is unused: codex pins only
+  // CODEX_HOME.
   workerEnv(
     workerHome: string,
+    _tmuxName: string,
     _controllerEnv: NodeJS.ProcessEnv = process.env,
   ): Record<string, string> {
     return codexWorkerEnv(workerHome);

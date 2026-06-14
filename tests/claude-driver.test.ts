@@ -66,15 +66,15 @@ describe('claude.bin', () => {
 });
 
 describe('claude.workerEnv', () => {
-  it('delegates to claudeWorkerEnv for the given controller env (ignoring workerHome)', () => {
-    expect(claude.workerEnv('/home', {})).toEqual(claudeWorkerEnv({}));
-    expect(claude.workerEnv('/home', { CLAUDE_CODE_USE_BEDROCK: '1' })).toEqual(
-      claudeWorkerEnv({ CLAUDE_CODE_USE_BEDROCK: '1' }),
-    );
+  it('delegates to claudeWorkerEnv for the given controller env (ignoring workerHome and tmuxName)', () => {
+    expect(claude.workerEnv('/home', 'w1', {})).toEqual(claudeWorkerEnv({}));
+    expect(
+      claude.workerEnv('/home', 'w1', { CLAUDE_CODE_USE_BEDROCK: '1' }),
+    ).toEqual(claudeWorkerEnv({ CLAUDE_CODE_USE_BEDROCK: '1' }));
   });
 
   it('always pins CLAUDE_CODE_SSE_PORT empty', () => {
-    expect(claude.workerEnv('/home', {}).CLAUDE_CODE_SSE_PORT).toBe('');
+    expect(claude.workerEnv('/home', 'w1', {}).CLAUDE_CODE_SSE_PORT).toBe('');
   });
 });
 

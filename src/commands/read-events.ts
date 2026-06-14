@@ -55,7 +55,9 @@ export async function cmdReadEvents(
     lines = filterByType(lines, opts.type);
   }
   if (opts.last !== undefined) {
-    lines = lines.slice(-opts.last);
+    // `tail -n 0` returns nothing; guard the JS footgun where slice(-0) ===
+    // slice(0) would otherwise return every line.
+    lines = opts.last <= 0 ? [] : lines.slice(-opts.last);
   }
   return { stdout: lines.join('\n'), code: 0 };
 }

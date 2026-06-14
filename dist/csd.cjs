@@ -1617,7 +1617,7 @@ async function cmdReadEvents(ctx, worker, opts) {
     lines = filterByType(lines, opts.type);
   }
   if (opts.last !== void 0) {
-    lines = lines.slice(-opts.last);
+    lines = opts.last <= 0 ? [] : lines.slice(-opts.last);
   }
   return { stdout: lines.join("\n"), code: 0 };
 }

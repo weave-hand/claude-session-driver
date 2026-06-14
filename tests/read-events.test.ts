@@ -82,6 +82,16 @@ describe('cmdReadEvents', () => {
     expect(lines[1]).toContain('"event":"stop"');
   });
 
+  it('returns NOTHING with --last 0 (bash tail -n 0), not all lines', async () => {
+    seedEvents(workerDir);
+    const result = await cmdReadEvents(makeCtx(workerDir), 'sid-readev', {
+      last: 0,
+    });
+    expect(result.code).toBe(0);
+    // slice(-0) === slice(0) === all lines; the guard must yield empty instead.
+    expect(result.stdout).toBe('');
+  });
+
   it('filters by --type, emitting only matching raw lines', async () => {
     seedEvents(workerDir);
     const result = await cmdReadEvents(makeCtx(workerDir), 'sid-readev', {

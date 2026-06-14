@@ -441,6 +441,23 @@ export function renderTurn(
 }
 
 /**
+ * The markdown turn as a `read-turn`/`converse --with-turn` command result.
+ *
+ * `renderTurn` ends in `\n\n` (the jq `-r` parity ending). The CLI's `emit`
+ * appends one more `\n` to every command's stdout, which would make the worker
+ * surface emit THREE trailing newlines where bash's `read-turn` emits exactly
+ * two. Strip a single trailing `\n` here so emit's append lands back on bash's
+ * `\n\n`. Both command paths (read-turn and converse --with-turn) use this, so
+ * they stay byte-identical.
+ */
+export function renderTurnForCommand(
+  turn: NormalizedTurn,
+  opts: { full: boolean },
+): string {
+  return renderTurn(turn, opts).replace(/\n$/, '');
+}
+
+/**
  * The assistant's reply text for a parsed turn: the `text` items joined with
  * newlines. Harness-agnostic — works for any driver's `parseTurn` output, so
  * converse can extract the reply uniformly across claude/codex/pi (the

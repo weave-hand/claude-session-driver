@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { renderTurn } from '../core/transcript.js';
+import { renderTurnForCommand } from '../core/transcript.js';
 import type { CommandContext, CommandResult } from './context.js';
 import { resolveWorker } from './context.js';
 
@@ -39,5 +39,8 @@ export async function cmdReadTurn(
     return { stderr: 'No user prompt found in session log', code: 1 };
   }
 
-  return { stdout: renderTurn(turn, { full: opts.full ?? false }), code: 0 };
+  return {
+    stdout: renderTurnForCommand(turn, { full: opts.full ?? false }),
+    code: 0,
+  };
 }

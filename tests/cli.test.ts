@@ -1,6 +1,6 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -11,7 +11,7 @@ import {
 } from '../src/cli.js';
 import type { CommandContext } from '../src/commands/context.js';
 import { appendEvent } from '../src/core/event-log.js';
-import { eventsPath } from '../src/core/paths.js';
+import { claudeTranscriptPath, eventsPath } from '../src/core/paths.js';
 import { makeTmux } from '../src/core/tmux.js';
 import { writeMeta } from '../src/core/worker-store.js';
 import { getDriver } from '../src/harness/registry.js';
@@ -271,6 +271,55 @@ describe('run — validation and dispatch', () => {
     const code = await run(['--worker', 'w', 'send'], io);
     expect(code).toBe(1);
     expect(err()).toContain('Usage: send <prompt-text>');
+  });
+});
+
+describe('read-turn — trailing newline parity (bash: exactly two)', () => {
+  let workerDir: string;
+  let home: string;
+  let prevWorkerDir: string | undefined;
+  let prevHome: string | undefined;
+  const SID = 'sid-rt-nl';
+  const CWD = '/home/user/project';
+
+  beforeEach(() => {
+    workerDir = mkdtempSync(join(tmpdir(), 'csd-rtnl-wd-'));
+    home = mkdtempSync(join(tmpdir(), 'csd-rtnl-home-'));
+    prevWorkerDir = process.env.CSD_WORKER_DIR;
+    prevHome = process.env.HOME;
+    process.env.CSD_WORKER_DIR = workerDir;
+    process.env.HOME = home;
+    writeMeta(workerDir, {
+      tmux_name: 'rtnl-worker',
+      session_id: SID,
+      cwd: CWD,
+      harness: 'claude',
+    });
+    const transcript = [
+      '{"type":"user","message":{"content":"do it"}}',
+      '{"type":"assistant","message":{"content":[{"type":"text","text":"ok"}]}}',
+    ].join('\n');
+    const p = claudeTranscriptPath(home, CWD, SID);
+    mkdirSync(dirname(p), { recursive: true });
+    writeFileSync(p, transcript);
+  });
+
+  afterEach(() => {
+    if (prevWorkerDir === undefined) delete process.env.CSD_WORKER_DIR;
+    else process.env.CSD_WORKER_DIR = prevWorkerDir;
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+    rmSync(workerDir, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it('emits exactly two trailing newlines, not three', async () => {
+    const { io, out } = makeIo();
+    const code = await run(['--worker', SID, 'read-turn'], io);
+    expect(code).toBe(0);
+    const text = out();
+    expect(text.endsWith('ok\n\n')).toBe(true);
+    expect(text.endsWith('\n\n\n')).toBe(false);
   });
 });
 

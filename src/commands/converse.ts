@@ -3,7 +3,7 @@ import { dumpConverseDiag } from '../core/diagnostics.js';
 import { readRawLines } from '../core/event-log.js';
 import { eventsPath } from '../core/paths.js';
 import type { Runner } from '../core/proc.js';
-import { assistantText, renderTurn } from '../core/transcript.js';
+import { assistantText, renderTurnForCommand } from '../core/transcript.js';
 import type { CommandContext, CommandResult } from './context.js';
 import { resolveWorker } from './context.js';
 import { cmdSend, isDeriveFirst, type SendOpts } from './send.js';
@@ -147,7 +147,10 @@ export async function cmdConverse(
       const turn = ctx.driver.parseTurn(transcript);
       if (turn.length > 0) {
         if (opts.withTurn) {
-          return { stdout: renderTurn(turn, { full: false }), code: 0 };
+          return {
+            stdout: renderTurnForCommand(turn, { full: false }),
+            code: 0,
+          };
         }
         const response = assistantText(turn);
         if (response.length > 0) {

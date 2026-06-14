@@ -432,6 +432,9 @@ function renderTurn(turn, opts) {
   return turn.map((item) => `${renderItem(item, opts.full)}
 `).join("");
 }
+function renderTurnForCommand(turn, opts) {
+  return renderTurn(turn, opts).replace(/\n$/, "");
+}
 function assistantText(turn) {
   return turn.filter(
     (item) => item.kind === "text"
@@ -1460,7 +1463,10 @@ csd-diagnostic: ${diagDest}` : "";
       const turn = ctx.driver.parseTurn(transcript);
       if (turn.length > 0) {
         if (opts.withTurn) {
-          return { stdout: renderTurn(turn, { full: false }), code: 0 };
+          return {
+            stdout: renderTurnForCommand(turn, { full: false }),
+            code: 0
+          };
         }
         const response = assistantText(turn);
         if (response.length > 0) {
@@ -1666,7 +1672,10 @@ async function cmdReadTurn(ctx, worker, opts) {
   if (turn.length === 0) {
     return { stderr: "No user prompt found in session log", code: 1 };
   }
-  return { stdout: renderTurn(turn, { full: opts.full ?? false }), code: 0 };
+  return {
+    stdout: renderTurnForCommand(turn, { full: opts.full ?? false }),
+    code: 0
+  };
 }
 
 // src/commands/session-id.ts

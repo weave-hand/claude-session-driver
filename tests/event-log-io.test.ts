@@ -39,6 +39,15 @@ describe('lastEvent', () => {
     appendEvent(f, { event: 'stop', ts: 'T2' });
     expect(lastEvent(f)?.event).toBe('stop');
   });
+
+  it('returns null when the LITERAL last line is malformed (bash tail -1 | jq)', () => {
+    // bash _worker_status does `tail -1 | jq` so a malformed final line yields
+    // unknown — it must NOT fall back to the prior parseable event.
+    const f = tmpFile();
+    appendEvent(f, { event: 'stop', ts: 'T1' });
+    writeFileSync(f, 'garbage-final-line\n', { flag: 'a' });
+    expect(lastEvent(f)).toBeNull();
+  });
 });
 
 describe('readEvents', () => {

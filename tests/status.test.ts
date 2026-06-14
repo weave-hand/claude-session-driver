@@ -86,6 +86,17 @@ describe('cmdStatus', () => {
     expect(result.stdout).toBe('idle');
   });
 
+  it('returns unknown when the LITERAL last line is malformed (bash tail -1 | jq)', async () => {
+    const ef = eventsPath(workerDir, 'sid-status-test');
+    appendEvent(ef, { event: 'stop', ts: new Date().toISOString() });
+    // A torn/partial final write: bash classifies the last line, which is
+    // garbage, as unknown — it must NOT fall back to the prior `stop` -> idle.
+    writeFileSync(ef, '{"event":"pre_tool_', { flag: 'a' });
+    const result = await cmdStatus(ctx, 'sid-status-test');
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe('unknown');
+  });
+
   it('returns working for last event = pre_tool_use', async () => {
     appendEvent(eventsPath(workerDir, 'sid-status-test'), {
       event: 'pre_tool_use',

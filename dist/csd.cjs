@@ -798,14 +798,10 @@ function readRawLines(file) {
   if (!(0, import_node_fs6.existsSync)(file)) return [];
   return (0, import_node_fs6.readFileSync)(file, "utf8").split("\n").filter((line) => line.length > 0);
 }
-function readEvents(file) {
-  if (!(0, import_node_fs6.existsSync)(file)) return [];
-  const raw = (0, import_node_fs6.readFileSync)(file, "utf8");
-  return raw.split("\n").filter((line) => line.length > 0).map(parseEvent).filter((e) => e !== null);
-}
 function lastEvent(file) {
-  const events = readEvents(file);
-  return events.at(-1) ?? null;
+  const lines = readRawLines(file);
+  const last = lines.at(-1);
+  return last === void 0 ? null : parseEvent(last);
 }
 function classifyStatus(last) {
   switch (last.event) {

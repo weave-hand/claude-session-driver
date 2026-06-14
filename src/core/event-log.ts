@@ -31,9 +31,19 @@ export function readEvents(file: string): WorkerEvent[] {
     .filter((e): e is WorkerEvent => e !== null);
 }
 
+/**
+ * The event parsed from the LITERAL last non-empty line of the file, or null if
+ * there are no lines OR that last line is malformed. This mirrors bash
+ * `_worker_status`' `tail -1 | jq` exactly: a torn/garbage final line yields
+ * `unknown` (via the caller's null -> unknown), rather than silently falling
+ * back to a prior parseable event the way `readEvents().at(-1)` would. Only the
+ * status path consumes this; `readEvents` keeps its skip-malformed behavior for
+ * full-stream consumers.
+ */
 export function lastEvent(file: string): WorkerEvent | null {
-  const events = readEvents(file);
-  return events.at(-1) ?? null;
+  const lines = readRawLines(file);
+  const last = lines.at(-1);
+  return last === undefined ? null : parseEvent(last);
 }
 
 export async function waitForEvent(

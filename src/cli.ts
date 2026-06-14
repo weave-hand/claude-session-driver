@@ -360,7 +360,10 @@ export async function run(argv: string[], io: Io = realIo): Promise<number> {
     case 'grant-consent':
       return emit(
         io,
-        await cmdGrantConsent(ctx, { confirm: () => grantConsentConfirm(io) }),
+        await cmdGrantConsent(ctx, {
+          warn: (text) => io.out(`${text}\n`),
+          confirm: () => grantConsentConfirm(io),
+        }),
       );
 
     case 'launch': {

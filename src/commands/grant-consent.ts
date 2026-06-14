@@ -7,7 +7,13 @@ acknowledge this risk and accept responsibility for any actions the
 worker takes.`;
 
 export interface GrantConsentOpts {
-  /** Called after the preamble is displayed. Return true if the user typed 'yes'. */
+  /**
+   * Emit the risk warning to the user. Called BEFORE `confirm` so the user sees
+   * the full warning before being asked to type 'yes' (bash prints the heredoc,
+   * THEN reads). Defaults to a no-op for callers that do not surface it.
+   */
+  warn?: (text: string) => void;
+  /** Called after the warning is displayed. Return true if the user typed 'yes'. */
   confirm: () => Promise<boolean>;
 }
 
@@ -21,10 +27,12 @@ export async function cmdGrantConsent(
     return { stdout: `Consent already granted at ${path}`, code: 0 };
   }
 
+  // Show the risk warning BEFORE prompting, matching bash (heredoc, then read).
+  opts.warn?.(PREAMBLE);
+
   const confirmed = await opts.confirm();
   if (!confirmed) {
     return {
-      stdout: PREAMBLE,
       stderr: 'Consent not granted.',
       code: 1,
     };
@@ -32,7 +40,7 @@ export async function cmdGrantConsent(
 
   grantConsent(ctx.home);
   return {
-    stdout: `${PREAMBLE}\nConsent granted. Written: ${path}`,
+    stdout: `Consent granted. Written: ${path}`,
     code: 0,
   };
 }

@@ -53,12 +53,32 @@ describe('cmdGrantConsent', () => {
   });
 
   it('does not grant consent and returns code 1 when confirm returns false', async () => {
+    const warned: string[] = [];
     const result = await cmdGrantConsent(makeCtx(home), {
+      warn: (s) => warned.push(s),
       confirm: async () => false,
     });
     expect(result.code).toBe(1);
     expect(result.stderr).toContain('not granted');
-    expect(result.stdout).toContain('--dangerously-skip-permissions');
+    expect(warned.join('')).toContain('--dangerously-skip-permissions');
     expect(existsSync(consentPath(home))).toBe(false);
+  });
+
+  it('emits the full risk warning BEFORE prompting (bash prints, then reads)', async () => {
+    const events: string[] = [];
+    const result = await cmdGrantConsent(makeCtx(home), {
+      warn: (s) => events.push(`warn:${s}`),
+      confirm: async () => {
+        events.push('confirm');
+        return true;
+      },
+    });
+    expect(result.code).toBe(0);
+    // The warning must be emitted before confirm() prompts/reads.
+    const warnIdx = events.findIndex((e) => e.startsWith('warn:'));
+    const confirmIdx = events.indexOf('confirm');
+    expect(warnIdx).toBeGreaterThanOrEqual(0);
+    expect(confirmIdx).toBeGreaterThan(warnIdx);
+    expect(events[warnIdx]).toContain('--dangerously-skip-permissions');
   });
 });

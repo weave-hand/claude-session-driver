@@ -1495,18 +1495,17 @@ async function cmdGrantConsent(ctx, opts) {
   if (hasConsent(ctx.home)) {
     return { stdout: `Consent already granted at ${path}`, code: 0 };
   }
+  opts.warn?.(PREAMBLE);
   const confirmed = await opts.confirm();
   if (!confirmed) {
     return {
-      stdout: PREAMBLE,
       stderr: "Consent not granted.",
       code: 1
     };
   }
   grantConsent(ctx.home);
   return {
-    stdout: `${PREAMBLE}
-Consent granted. Written: ${path}`,
+    stdout: `Consent granted. Written: ${path}`,
     code: 0
   };
 }
@@ -2039,7 +2038,11 @@ async function run2(argv, io = realIo) {
     case "grant-consent":
       return emit(
         io,
-        await cmdGrantConsent(ctx, { confirm: () => grantConsentConfirm(io) })
+        await cmdGrantConsent(ctx, {
+          warn: (text) => io.out(`${text}
+`),
+          confirm: () => grantConsentConfirm(io)
+        })
       );
     case "launch": {
       const parsedArgs = parseLaunchArgs(args);

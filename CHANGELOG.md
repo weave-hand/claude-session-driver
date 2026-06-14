@@ -1,5 +1,42 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- Rewrote `csd` from bash to a TypeScript core. The published plugin now ships
+  committed `dist/` bundles (`dist/csd.cjs`, `dist/emit-event.cjs`,
+  `dist/pi-extension.mjs`); there is **no build step for users** — the
+  `skills/driving-claude-code-sessions/scripts/csd` shim just execs
+  `node dist/csd.cjs`. The full v3.0.2 Claude command surface is preserved
+  (`launch`/`adopt`/`list`/`grant-consent` and the per-worker
+  `converse`/`send`/`wait-for-turn`/`status`/`read-events`/`read-turn`/`stop`/`handoff`/`session-id`/`events-file`).
+- The lifecycle hooks are now **node programs** (`dist/emit-event.cjs`) instead
+  of bash + `jq`. This resolves **issue #15** (on Windows, Claude Code's hook
+  PATH did not include `bash`/`jq`, so the old shell hooks silently failed): node
+  is inherently cross-platform, so the `run-hook.cmd` polyglot wrapper and the
+  bash `emit-event`/`_lib.sh` are gone. `node` is the only added runtime
+  dependency, and it ships wherever Claude Code runs.
+- **`jq` is no longer a dependency.** The only external requirements are now
+  `tmux` and the harness CLI you launch.
+- The worker dir moved from `/tmp/claude-workers` to `/tmp/csd-workers`. When the
+  default dir is in use, `csd` creates a back-compat symlink
+  `/tmp/claude-workers → /tmp/csd-workers`, so existing references and shim paths
+  keep resolving. Override the dir with `CSD_WORKER_DIR`.
+
+### Added
+- **Multi-harness support via `--harness <claude|codex|pi>`** on `csd launch`
+  (default `claude`). The tool now drives three coding-agent harnesses — Claude
+  Code, OpenAI Codex, and Pi — through the same CLI/tmux/command surface. The
+  controller-facing commands behave identically across harnesses; only `adopt`
+  is Claude-only (Codex and Pi mint their own session ids and offer no
+  resume-by-id). Codex's control plane is the same node hooks as Claude (it
+  stages the operator's `~/.codex` auth into a per-worker `CODEX_HOME`); Pi's is
+  a native TypeScript extension loaded with `pi -e` (it stages `~/.pi/agent`).
+- `CSD_CODEX_BIN` / `CSD_PI_BIN` — path to the codex / pi binary (mirrors
+  `CSD_CLAUDE_BIN`; defaults resolved via `PATH`).
+- `CSD_CODEX_MODEL` / `CSD_PI_MODEL` — optional model override for codex / pi
+  workers (unset = the harness default; codex's is `gpt-5.5`).
+
 ## [3.0.2] - 2026-05-31
 
 ### Fixed

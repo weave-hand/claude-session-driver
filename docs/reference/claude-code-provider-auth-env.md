@@ -1,8 +1,8 @@
 # How Claude Code resolves provider & auth from the environment
 
 Reference notes for maintainers. These explain *why* `csd` pins a specific set
-of environment variables when it launches or adopts a worker (see
-`_build_worker_env_args` in `skills/driving-claude-code-sessions/scripts/csd`).
+of environment variables when it launches or adopts a Claude worker (see
+`claudeWorkerEnv` in `src/harness/claude.ts`).
 
 Everything below was read directly out of the Claude Code binary (the
 Bun-compiled native build, `@anthropic-ai/claude-code-darwin-arm64`, v2.1.159)

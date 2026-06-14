@@ -52,33 +52,39 @@ const PER_WORKER_SUBS = [
 ];
 
 /**
- * The user contract. A verbatim port of the bash `usage()` heredoc, with the
- * two `/tmp/claude-workers` references updated to the new `/tmp/csd-workers`
- * default (the back-compat symlink keeps the old path working).
+ * The user contract. Ported from the bash `usage()` heredoc, updated for the
+ * TypeScript multi-harness tool: the `--harness` launch flag, the
+ * `/tmp/csd-workers` default worker dir (the back-compat symlink keeps the old
+ * `/tmp/claude-workers` path working), and the per-harness env vars.
  */
 const USAGE = `Usage: csd <subcommand> [args...]
        csd --worker <name> <subcommand> [args...]
 
-A worker is a Claude Code session in a tmux pane with the session-driver plugin
-loaded. \`csd launch\` prints a *shim path* on stdout (deterministic at
-/tmp/csd-workers/bin/<tmux-name>) — run that shim for all per-worker
-subcommands. \`csd stop\` removes the shim along with the worker's state.
+A worker is a coding-agent session (Claude Code, Codex, or Pi) in a tmux pane
+that emits lifecycle events the controller observes. \`csd launch\` prints a
+*shim path* on stdout (deterministic at /tmp/csd-workers/bin/<tmux-name>) — run
+that shim for all per-worker subcommands. \`csd stop\` removes the shim along
+with the worker's state. The per-worker surface is identical across harnesses.
 
 Top-level subcommands:
-  launch <tmux-name> <cwd> [-- claude-args...]
-                       Bootstrap a worker; shim path on stdout, panel on stderr
+  launch [--harness <claude|codex|pi>] <tmux-name> <cwd> [-- harness-args...]
+                       Bootstrap a worker (harness defaults to claude); shim
+                       path on stdout, panel on stderr
   adopt <tmux-name> <cwd> <session-id> [-- claude-args...]
                        Re-adopt an existing Claude session as a driveable
-                       worker via \`claude --resume <session-id>\`. Restores a
-                       worker after a reboot/crash wiped /tmp/csd-workers
-                       while the conversation transcript survived. If a tmux
-                       session named <tmux-name> already exists (e.g. restored
-                       by tmux-resurrect), respawns its pane in place; else
-                       opens a new one. Shim path on stdout, panel on stderr
+                       worker via \`claude --resume <session-id>\` (claude-only;
+                       codex/pi mint their own ids and offer no resume-by-id).
+                       Restores a worker after a reboot/crash wiped
+                       /tmp/csd-workers while the conversation transcript
+                       survived. If a tmux session named <tmux-name> already
+                       exists (e.g. restored by tmux-resurrect), respawns its
+                       pane in place; else opens a new one. Shim path on stdout,
+                       panel on stderr
   list [--all] [<pattern>]
                        Enumerate workers (default: skip workers whose tmux is
                        gone). Optional pattern filters by tmux-name substring
-  grant-consent        One-time consent for --dangerously-skip-permissions
+  grant-consent        One-time consent for running workers with permissions
+                       bypassed (--dangerously-skip-permissions et al.)
   help                 Show this message
 
 Per-worker subcommands (require --worker, supplied by the shim):
@@ -95,15 +101,20 @@ Per-worker subcommands (require --worker, supplied by the shim):
                        are truncated to 5 lines; --full shows them complete
   stop                 /exit, clean up meta + events + shim
   handoff              Print tmux-attach instructions for a human
-  session-id           Print the worker's session UUID
+  session-id           Print the worker's session id
   events-file          Print the absolute path to the events JSONL
 
 Environment variables:
-  CSD_CLAUDE_BIN       Path to the claude binary (default: claude — resolved via PATH).
-                       Set when claude is not on PATH or you want a specific version.
+  CSD_CLAUDE_BIN / CSD_CODEX_BIN / CSD_PI_BIN
+                       Path to each harness binary (defaults: claude / codex / pi,
+                       resolved via PATH). Set when the binary is not on PATH or you
+                       want to pin a specific version.
+  CSD_CODEX_MODEL / CSD_PI_MODEL
+                       Optional model override for codex / pi workers. Unset = the
+                       harness default (codex: gpt-5.5; pi: its configured default).
   CSD_CONVERSE_DIAG_FILE
                        When set, \`converse\` writes a post-mortem diagnostic (ps tree +
-                       tmux capture-pane + claude session JSONL tail + csd events tail)
+                       tmux capture-pane + worker session JSONL tail + csd events tail)
                        to this path on timeout, then emits "csd-diagnostic: <path>" to
                        stderr. Overwritten on each timeout. Unset = no diagnostic file.
   HOME                 Used to locate ~/.claude/projects/<encoded-cwd>/<sid>.jsonl and
@@ -212,7 +223,7 @@ function readLine(): Promise<string> {
   });
 }
 
-/** Parse `launch <tmux-name> <cwd> [--harness <id>] [-- claude-args...]`. */
+/** Parse `launch [--harness <id>] <tmux-name> <cwd> [-- harness-args...]`. */
 function parseLaunchArgs(
   argv: string[],
 ):

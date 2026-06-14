@@ -156,7 +156,10 @@ function parseWorker(
       break;
     }
   }
-  return { worker, rest: argv.slice(i) };
+  // bash uses `[ -z "$WORKER" ]`: an empty worker (`--worker=` or `--worker ""`)
+  // is treated as MISSING, not as a literal worker named '' (which would yield
+  // exit 1 "no worker known as ''" instead of the exit 2 "required" error).
+  return { worker: worker ? worker : undefined, rest: argv.slice(i) };
 }
 
 /**

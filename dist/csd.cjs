@@ -1900,7 +1900,7 @@ function parseWorker(argv) {
       break;
     }
   }
-  return { worker, rest: argv.slice(i) };
+  return { worker: worker ? worker : void 0, rest: argv.slice(i) };
 }
 function resolveWorkerHarness(dir, worker) {
   const sid = resolveSession(dir, worker);

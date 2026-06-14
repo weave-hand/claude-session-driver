@@ -205,6 +205,15 @@ describe('run — validation and dispatch', () => {
     expect(err()).toContain("Error: no worker known as 'nope'");
   });
 
+  it('treats an empty --worker= as missing (bash -z), not as worker ""', async () => {
+    const { io, err } = makeIo();
+    const code = await run(['--worker=', 'status'], io);
+    // bash: [ -z "$WORKER" ] -> required -> exit 2, NOT exit 1 "no worker '' "
+    expect(code).toBe(2);
+    expect(err()).toContain("Error: --worker <name> is required for 'status'");
+    expect(err()).not.toContain("no worker known as ''");
+  });
+
   it('rejects read-events --last with no value (would otherwise be NaN → all lines)', async () => {
     const { io, err } = makeIo();
     const code = await run(['--worker', 'w', 'read-events', '--last'], io);

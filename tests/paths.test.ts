@@ -49,6 +49,24 @@ describe('path builders', () => {
       '/h/.claude/projects/-Users-x-p/SID.jsonl',
     );
   });
+
+  it('encodes a dot in the cwd as a dash (real claude dir encoding)', () => {
+    expect(claudeTranscriptPath('/h', '/Users/x/.claude', 'SID')).toBe(
+      '/h/.claude/projects/-Users-x--claude/SID.jsonl',
+    );
+  });
+
+  it('encodes an underscore in the cwd as a dash', () => {
+    expect(claudeTranscriptPath('/h', '/a/my_proj', 'SID')).toBe(
+      '/h/.claude/projects/-a-my-proj/SID.jsonl',
+    );
+  });
+
+  it('encodes a /.worktrees segment as a double-dash', () => {
+    expect(claudeTranscriptPath('/h', '/u/lace/.worktrees/x', 'SID')).toBe(
+      '/h/.claude/projects/-u-lace--worktrees-x/SID.jsonl',
+    );
+  });
 });
 
 describe('ensureBackCompatSymlink', () => {

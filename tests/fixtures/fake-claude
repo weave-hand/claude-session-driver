@@ -75,7 +75,7 @@ const transcriptPath = join(
   home,
   '.claude',
   'projects',
-  cwd.split('/').join('-'),
+  cwd.replace(/[/._]/g, '-'),
   `${sid}.jsonl`,
 );
 

@@ -383,6 +383,10 @@ export function parsePiTurn(jsonl: string): NormalizedTurn {
     } else if (m.role === 'assistant') {
       collectPiAssistant(m.content, turn);
     } else if (m.role === 'toolResult') {
+      // Pi always sends toolResult content as an array of typed blocks (never a
+      // bare null string), so piContentText (returns '' for null/non-array) is
+      // correct here. Claude/codex use resultContent which returns '(no output)'
+      // for null — that bare-string-null case does not arise in pi's format.
       turn.push({
         kind: 'tool_result',
         content: piContentText(m.content),

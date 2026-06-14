@@ -1006,15 +1006,17 @@ async function launchDerive(ctx, { driver, tmuxName, cwd, extraArgs, invocation 
     ...extraArgs
   ];
   await ctx.tmux.newSession(tmuxName, cwd, env, argv);
-  await dismissCodexTrustGate(ctx, tmuxName, {
-    timeoutMs: opts.codexTrustTimeoutMs,
-    settleMs: opts.codexTrustSettleMs,
-    pollMs: opts.pollMs
-  });
-  await awaitComposerReady(ctx, tmuxName, {
-    timeoutMs: opts.codexReadyTimeoutMs,
-    pollMs: opts.pollMs
-  });
+  if (driver.id === "codex") {
+    await dismissCodexTrustGate(ctx, tmuxName, {
+      timeoutMs: opts.codexTrustTimeoutMs,
+      settleMs: opts.codexTrustSettleMs,
+      pollMs: opts.pollMs
+    });
+    await awaitComposerReady(ctx, tmuxName, {
+      timeoutMs: opts.codexReadyTimeoutMs,
+      pollMs: opts.pollMs
+    });
+  }
   const shim = writeShim(ctx.workerDir, tmuxName, opts.csdEntry);
   const panel = renderPanel({
     header: "Worker launched.",

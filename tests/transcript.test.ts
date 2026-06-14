@@ -420,6 +420,28 @@ describe('parsePiTurn / renderTurn', () => {
     expect(md).not.toContain('undefined');
   });
 
+  it('yields empty string (not "(no output)") for a null-content toolResult', () => {
+    // Pi's toolResult content is always array-typed; null/non-array degrades to ''
+    // rather than the '(no output)' fallback used for claude's bare-string-null.
+    const session = [
+      header,
+      userStr('go'),
+      msg({
+        role: 'toolResult',
+        toolCallId: 'c',
+        toolName: 't',
+        content: null,
+        isError: false,
+      }),
+    ].join('\n');
+    const turn = parsePiTurn(session);
+    expect(turn).toContainEqual({
+      kind: 'tool_result',
+      content: '',
+      isError: false,
+    });
+  });
+
   it('returns [] for empty input', () => {
     expect(parsePiTurn('')).toEqual([]);
   });

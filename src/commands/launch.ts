@@ -217,19 +217,22 @@ async function launchAssign(
 }
 
 /**
- * The derive-id launch (codex): NO session id, NO pre-written meta. Write the
- * sidecar `.harness` marker, prepare the per-worker CODEX_HOME, start tmux,
- * dismiss the trust gate, wait for the composer, write the shim. The meta
- * self-registers on the first prompt; the session id / events file are unknown
- * at launch (shown as placeholders in the panel).
+ * The derive-id launch (codex, pi): NO session id, NO pre-written meta. Write
+ * the sidecar `.harness` marker, prepare the per-worker home, start tmux, write
+ * the shim. The meta self-registers on the first prompt; the session id / events
+ * file are unknown at launch (shown as placeholders in the panel).
+ *
+ * Codex additionally runs the trust-gate dismissal and composer-ready wait.
+ * Pi skips both (the extension self-registers the meta when pi fires its first
+ * event; pi's real launch-ready wait is handled in the extension layer).
  */
 async function launchDerive(
   ctx: CommandContext,
   { driver, tmuxName, cwd, extraArgs, invocation }: LaunchInner,
   opts: BootstrapOpts,
 ): Promise<CommandResult> {
-  // Sidecar marker so per-worker commands load the codex driver during the
-  // pre-registration window (before the hook self-registers the meta).
+  // Sidecar marker so per-worker commands load the codex or pi driver during
+  // the pre-registration window (before the extension self-registers the meta).
   writeHarnessMarker(ctx.workerDir, tmuxName, driver.id);
 
   const workerHome = deriveWorkerHome(ctx.workerDir, tmuxName);
@@ -245,16 +248,19 @@ async function launchDerive(
   // Codex post-launch (trust-gate + composer) is handled here in the command
   // layer via dismissCodexTrustGate/awaitComposerReady rather than through
   // driver.postLaunch, which is a no-op on the codex driver and cannot reach
-  // the tmux pane directly.
-  await dismissCodexTrustGate(ctx, tmuxName, {
-    timeoutMs: opts.codexTrustTimeoutMs,
-    settleMs: opts.codexTrustSettleMs,
-    pollMs: opts.pollMs,
-  });
-  await awaitComposerReady(ctx, tmuxName, {
-    timeoutMs: opts.codexReadyTimeoutMs,
-    pollMs: opts.pollMs,
-  });
+  // the tmux pane directly. Pi has no trust gate or composer glyph, so both
+  // are skipped entirely for pi workers.
+  if (driver.id === 'codex') {
+    await dismissCodexTrustGate(ctx, tmuxName, {
+      timeoutMs: opts.codexTrustTimeoutMs,
+      settleMs: opts.codexTrustSettleMs,
+      pollMs: opts.pollMs,
+    });
+    await awaitComposerReady(ctx, tmuxName, {
+      timeoutMs: opts.codexReadyTimeoutMs,
+      pollMs: opts.pollMs,
+    });
+  }
 
   const shim = writeShim(ctx.workerDir, tmuxName, opts.csdEntry);
   const panel = renderPanel({

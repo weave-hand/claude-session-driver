@@ -67,6 +67,22 @@ export function promptSubmittedSince(
  * every `retryInterval` seconds until the worker emits `user_prompt_submit`
  * (after the events file's pre-send line count) or `submitTimeout` elapses.
  */
+/**
+ * True when this is the FIRST prompt to a derive worker (codex/pi): the harness
+ * mints its own id on the first prompt, so no `<sid>.meta` exists yet and the
+ * worker can only be addressed by its tmux_name. `cmdSend` routes this to
+ * `sendDeriveFirst` (paste-by-name, poll for the self-registered meta);
+ * `cmdConverse` uses the same predicate to send-before-resolve. The claude
+ * (assign) path and every subsequent send to a registered derive worker are
+ * false here and take the normal resolve-then-send path.
+ */
+export function isDeriveFirst(ctx: CommandContext, worker: string): boolean {
+  return (
+    ctx.driver.idStrategy === 'derive' &&
+    resolveSession(ctx.workerDir, worker) === null
+  );
+}
+
 export async function cmdSend(
   ctx: CommandContext,
   worker: string,
@@ -79,10 +95,7 @@ export async function cmdSend(
   // meta; we then poll for it to learn the sid. The claude (assign) path, and
   // every subsequent send to an already-registered derive worker, take the
   // normal resolve-then-send path.
-  if (
-    ctx.driver.idStrategy === 'derive' &&
-    resolveSession(ctx.workerDir, worker) === null
-  ) {
+  if (isDeriveFirst(ctx, worker)) {
     return sendDeriveFirst(ctx, worker, prompt, opts);
   }
 

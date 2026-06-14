@@ -368,4 +368,34 @@ describe('cmdConverse — codex/pi harness shapes', () => {
     expect(result.code).toBe(0);
     expect(result.stdout).toBe('pi replies');
   });
+
+  it('first converse to a fresh derive worker (no meta yet) sends by tmux name, then resolves', async () => {
+    // A fresh codex worker: NO <sid>.meta exists, so it can only be addressed by
+    // tmux_name. cmdConverse must NOT fail `no worker known` up front — it sends
+    // first (which self-registers the meta like codex's SessionStart hook), then
+    // resolves and returns the reply.
+    const ef = eventsPath(workerDir, SID);
+    const tmux = respondingTmux(ef, () => {
+      // The codex hook self-registers the meta on the first prompt.
+      registerMeta('codex');
+      writeRollout([CODEX_USER, CODEX_ASSISTANT].join('\n'));
+    });
+    const ctx: CommandContext = {
+      workerDir,
+      home: workerDir,
+      tmux,
+      driver: getDriver('codex'),
+    };
+    // Addressed by TMUX_NAME (no sid known yet).
+    const result = await cmdConverse(ctx, TMUX_NAME, 'do the thing', {
+      ...fastOpts,
+      sendOpts: {
+        ...fastOpts.sendOpts,
+        registerTimeout: 5,
+        registerPollMs: 5,
+      },
+    });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe('codex says hello');
+  });
 });

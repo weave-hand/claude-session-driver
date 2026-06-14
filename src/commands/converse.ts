@@ -6,7 +6,7 @@ import type { Runner } from '../core/proc.js';
 import { assistantText, renderTurn } from '../core/transcript.js';
 import type { CommandContext, CommandResult } from './context.js';
 import { resolveWorker } from './context.js';
-import { cmdSend, type SendOpts } from './send.js';
+import { cmdSend, isDeriveFirst, type SendOpts } from './send.js';
 import { cmdWaitForTurn } from './wait-for-turn.js';
 
 const sleep = (ms: number): Promise<void> =>
@@ -59,6 +59,39 @@ export async function cmdConverse(
   prompt: string,
   opts: ConverseOpts,
 ): Promise<CommandResult> {
+  const timeout = opts.timeout ?? 120;
+  const postPollCount = opts.postPollCount ?? 20;
+  const postPollMs = opts.postPollMs ?? 100;
+  const now = opts.now ?? (() => new Date().toISOString());
+
+  // A fresh derive worker (codex/pi) has no `<sid>.meta` until its first prompt
+  // self-registers it; `worker` is the tmux_name. cmdSend's sendDeriveFirst
+  // handles that pre-registration window (paste-by-name, poll for the meta), so
+  // we MUST send before resolving — resolving first would fail `no worker known`
+  // (the bug cmdSend already fixed for plain `send`). The events file starts
+  // empty, so wait-for-turn scans this first turn from line 0 (afterLine = 0).
+  //
+  // For an assign worker (claude) or an already-registered derive worker we
+  // resolve first — preserving bash's order, which validates the meta/cwd before
+  // sending — then capture the pre-send events line and send.
+  const deriveFirst = isDeriveFirst(ctx, worker);
+  let afterLine = 0;
+  if (!deriveFirst) {
+    const pre = resolveWorker(ctx, worker);
+    if ('code' in pre) return pre;
+    if (!pre.meta.cwd) {
+      return {
+        stderr: 'Error: Could not determine working directory from meta file',
+        code: 1,
+      };
+    }
+    afterLine = readRawLines(eventsPath(ctx.workerDir, pre.sid)).length;
+  }
+
+  const sendResult = await cmdSend(ctx, worker, prompt, opts.sendOpts ?? {});
+  if (sendResult.code !== 0) return sendResult;
+
+  // Resolve now: for a derive worker the meta self-registered during the send.
   const resolved = resolveWorker(ctx, worker);
   if ('code' in resolved) return resolved;
   const { sid, meta } = resolved;
@@ -70,18 +103,8 @@ export async function cmdConverse(
     };
   }
 
-  const timeout = opts.timeout ?? 120;
-  const postPollCount = opts.postPollCount ?? 20;
-  const postPollMs = opts.postPollMs ?? 100;
-  const now = opts.now ?? (() => new Date().toISOString());
-
   const logFile = ctx.driver.transcriptPath(sid, meta.cwd, ctx.home);
   const eventFile = eventsPath(ctx.workerDir, sid);
-
-  const afterLine = readRawLines(eventFile).length;
-
-  const sendResult = await cmdSend(ctx, worker, prompt, opts.sendOpts ?? {});
-  if (sendResult.code !== 0) return sendResult;
 
   const diagDest = process.env.CSD_CONVERSE_DIAG_FILE;
   const dumpDiag = async (reason: string): Promise<string> => {

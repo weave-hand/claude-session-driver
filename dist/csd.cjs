@@ -1251,8 +1251,11 @@ function promptSubmittedSince(eventFile, beforeLine) {
   if (lines.length <= beforeLine) return false;
   return lines.slice(beforeLine).some((line) => parseEvent(line)?.event === "user_prompt_submit");
 }
+function isDeriveFirst(ctx, worker) {
+  return ctx.driver.idStrategy === "derive" && resolveSession(ctx.workerDir, worker) === null;
+}
 async function cmdSend(ctx, worker, prompt, opts = {}) {
-  if (ctx.driver.idStrategy === "derive" && resolveSession(ctx.workerDir, worker) === null) {
+  if (isDeriveFirst(ctx, worker)) {
     return sendDeriveFirst(ctx, worker, prompt, opts);
   }
   const resolved = resolveWorker(ctx, worker);
@@ -1384,6 +1387,25 @@ function readTranscript(file) {
   return (0, import_node_fs11.existsSync)(file) ? (0, import_node_fs11.readFileSync)(file, "utf8") : "";
 }
 async function cmdConverse(ctx, worker, prompt, opts) {
+  const timeout = opts.timeout ?? 120;
+  const postPollCount = opts.postPollCount ?? 20;
+  const postPollMs = opts.postPollMs ?? 100;
+  const now = opts.now ?? (() => (/* @__PURE__ */ new Date()).toISOString());
+  const deriveFirst = isDeriveFirst(ctx, worker);
+  let afterLine = 0;
+  if (!deriveFirst) {
+    const pre = resolveWorker(ctx, worker);
+    if ("code" in pre) return pre;
+    if (!pre.meta.cwd) {
+      return {
+        stderr: "Error: Could not determine working directory from meta file",
+        code: 1
+      };
+    }
+    afterLine = readRawLines(eventsPath(ctx.workerDir, pre.sid)).length;
+  }
+  const sendResult = await cmdSend(ctx, worker, prompt, opts.sendOpts ?? {});
+  if (sendResult.code !== 0) return sendResult;
   const resolved = resolveWorker(ctx, worker);
   if ("code" in resolved) return resolved;
   const { sid, meta } = resolved;
@@ -1393,15 +1415,8 @@ async function cmdConverse(ctx, worker, prompt, opts) {
       code: 1
     };
   }
-  const timeout = opts.timeout ?? 120;
-  const postPollCount = opts.postPollCount ?? 20;
-  const postPollMs = opts.postPollMs ?? 100;
-  const now = opts.now ?? (() => (/* @__PURE__ */ new Date()).toISOString());
   const logFile = ctx.driver.transcriptPath(sid, meta.cwd, ctx.home);
   const eventFile = eventsPath(ctx.workerDir, sid);
-  const afterLine = readRawLines(eventFile).length;
-  const sendResult = await cmdSend(ctx, worker, prompt, opts.sendOpts ?? {});
-  if (sendResult.code !== 0) return sendResult;
   const diagDest = process.env.CSD_CONVERSE_DIAG_FILE;
   const dumpDiag = async (reason) => {
     if (!diagDest) return "";

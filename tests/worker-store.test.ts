@@ -1,4 +1,10 @@
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -7,6 +13,7 @@ import {
   harnessMarkerPath,
   metaPath,
   shimPath,
+  workerHomePath,
 } from '../src/core/paths.js';
 import {
   listWorkers,
@@ -161,6 +168,25 @@ describe('removeWorker', () => {
   it('does not throw when files are already gone', () => {
     const dir = tmpDir();
     expect(() => removeWorker(dir, 'ghost-sid', 'ghost-worker')).not.toThrow();
+  });
+
+  it('removes the per-worker home dir (staged operator credentials)', () => {
+    const dir = tmpDir();
+    writeMeta(dir, baseMeta);
+    // Simulate codex/pi prepare(): a per-worker home holding the operator's auth.
+    const home = workerHomePath(dir, 'my-worker');
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, 'auth.json'), '{"token":"operator-secret"}');
+
+    removeWorker(dir, 'sid-abc', 'my-worker');
+
+    expect(() => statSync(home)).toThrow();
+  });
+
+  it('does not throw when the per-worker home dir is absent', () => {
+    const dir = tmpDir();
+    writeMeta(dir, baseMeta);
+    expect(() => removeWorker(dir, 'sid-abc', 'my-worker')).not.toThrow();
   });
 });
 

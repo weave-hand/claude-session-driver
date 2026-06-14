@@ -2,7 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { hasConsent } from '../core/consent.js';
-import { ensureBackCompatSymlink, eventsPath } from '../core/paths.js';
+import {
+  ensureBackCompatSymlink,
+  eventsPath,
+  workerHomePath,
+} from '../core/paths.js';
 import { shellQuote } from '../core/shell.js';
 import { isoSecondsUtc } from '../core/time.js';
 import {
@@ -99,10 +103,11 @@ export function renderPanel(opts: {
 /**
  * The per-worker home dir for a derive harness (codex's CODEX_HOME). Deterministic
  * from tmux_name so it can be re-derived without persisted state. Each worker gets
- * its own config/auth/sessions dir under `<workerDir>/homes/<tmuxName>`.
+ * its own config/auth/sessions dir under `<workerDir>/homes/<tmuxName>` — the same
+ * path `removeWorker` cleans up on stop (single source of truth in `paths.ts`).
  */
 export function deriveWorkerHome(workerDir: string, tmuxName: string): string {
-  return join(workerDir, 'homes', tmuxName);
+  return workerHomePath(workerDir, tmuxName);
 }
 
 /**

@@ -8,7 +8,13 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname } from 'node:path';
-import { eventsPath, harnessMarkerPath, metaPath, shimPath } from './paths.js';
+import {
+  eventsPath,
+  harnessMarkerPath,
+  metaPath,
+  shimPath,
+  workerHomePath,
+} from './paths.js';
 
 export interface WorkerMeta {
   tmux_name: string;
@@ -90,4 +96,7 @@ export function removeWorker(dir: string, sid: string, name: string): void {
   rmSync(eventsPath(dir, sid), { force: true });
   rmSync(shimPath(dir, name), { force: true });
   rmSync(harnessMarkerPath(dir, name), { force: true });
+  // The per-worker home (codex/pi staged the operator's auth.json here during
+  // prepare); remove it recursively so stop leaves no staged credentials behind.
+  rmSync(workerHomePath(dir, name), { recursive: true, force: true });
 }

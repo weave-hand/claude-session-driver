@@ -1,11 +1,22 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { CommandContext } from '../src/commands/context.js';
 import { cmdStop } from '../src/commands/stop.js';
 import { appendEvent } from '../src/core/event-log.js';
-import { eventsPath, metaPath, shimPath } from '../src/core/paths.js';
+import {
+  eventsPath,
+  metaPath,
+  shimPath,
+  workerHomePath,
+} from '../src/core/paths.js';
 import type { Tmux } from '../src/core/tmux.js';
 import { writeMeta, writeShim } from '../src/core/worker-store.js';
 import { getDriver } from '../src/harness/registry.js';
@@ -210,5 +221,24 @@ describe('cmdStop', () => {
       events: false,
       shim: false,
     });
+  });
+
+  it('removes the per-worker home (staged operator credentials) on stop', async () => {
+    // A derive worker stages the operator's auth in a per-worker home.
+    const home = workerHomePath(workerDir, TMUX_NAME);
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, 'auth.json'), '{"token":"operator-secret"}');
+
+    const calls: FakeTmuxCalls = {
+      sendText: [],
+      sendEnter: [],
+      killSession: [],
+    };
+    const tmux = fakeTmux(() => false, calls);
+    const ctx = makeCtx(workerDir, tmux);
+    const result = await cmdStop(ctx, SID, { stopTimeout: 5, pollMs: 10 });
+
+    expect(result.code).toBe(0);
+    expect(existsSync(home)).toBe(false);
   });
 });

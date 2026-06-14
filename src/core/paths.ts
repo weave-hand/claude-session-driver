@@ -20,6 +20,17 @@ export function shimPath(dir: string, name: string): string {
 }
 
 /**
+ * The per-worker home dir, keyed by tmux_name. Derive harnesses (codex's
+ * CODEX_HOME, pi's PI_CODING_AGENT_DIR) stage the operator's auth and config
+ * here during `prepare`. Deterministic from tmux_name so it can be re-derived
+ * without persisted state; `stop`/`removeWorker` deletes it to clean up the
+ * staged credentials.
+ */
+export function workerHomePath(dir: string, name: string): string {
+  return `${dir}/homes/${name}`;
+}
+
+/**
  * The sidecar harness marker keyed by tmux_name. Written at launch for derive
  * harnesses (codex), whose `<sid>.meta` does not exist until the producer
  * self-registers it on the first prompt — so per-worker commands can load the

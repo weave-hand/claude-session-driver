@@ -65,6 +65,9 @@ function metaPath(dir, sid) {
 function shimPath(dir, name) {
   return `${dir}/bin/${name}`;
 }
+function workerHomePath(dir, name) {
+  return `${dir}/homes/${name}`;
+}
 function harnessMarkerPath(dir, name) {
   return `${dir}/${name}.harness`;
 }
@@ -144,6 +147,7 @@ function removeWorker(dir, sid, name) {
   (0, import_node_fs3.rmSync)(eventsPath(dir, sid), { force: true });
   (0, import_node_fs3.rmSync)(shimPath(dir, name), { force: true });
   (0, import_node_fs3.rmSync)(harnessMarkerPath(dir, name), { force: true });
+  (0, import_node_fs3.rmSync)(workerHomePath(dir, name), { recursive: true, force: true });
 }
 
 // src/core/transcript.ts
@@ -970,7 +974,7 @@ function renderPanel(opts) {
   ].join("\n");
 }
 function deriveWorkerHome(workerDir2, tmuxName) {
-  return (0, import_node_path5.join)(workerDir2, "homes", tmuxName);
+  return workerHomePath(workerDir2, tmuxName);
 }
 async function cmdLaunch(ctx, args, opts) {
   const { tmuxName, extraArgs } = args;

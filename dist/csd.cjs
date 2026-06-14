@@ -72,7 +72,7 @@ function harnessMarkerPath(dir, name) {
   return `${dir}/${name}.harness`;
 }
 function claudeTranscriptPath(home, cwd, sid) {
-  return `${home}/.claude/projects/${cwd.replace(/[/._]/g, "-")}/${sid}.jsonl`;
+  return `${home}/.claude/projects/${cwd.replace(/[/._:]/g, "-")}/${sid}.jsonl`;
 }
 function ensureBackCompatSymlink(dir) {
   if (dir !== DEFAULT_WORKER_DIR) return;

@@ -67,6 +67,12 @@ describe('path builders', () => {
       '/h/.claude/projects/-u-lace--worktrees-x/SID.jsonl',
     );
   });
+
+  it('encodes a colon in the cwd as a dash (real claude dir encoding)', () => {
+    expect(claudeTranscriptPath('/h', '/a/c:d', 'SID')).toBe(
+      '/h/.claude/projects/-a-c-d/SID.jsonl',
+    );
+  });
 });
 
 describe('ensureBackCompatSymlink', () => {

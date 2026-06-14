@@ -46,7 +46,7 @@ export function claudeTranscriptPath(
   cwd: string,
   sid: string,
 ): string {
-  return `${home}/.claude/projects/${cwd.replace(/[/._]/g, '-')}/${sid}.jsonl`;
+  return `${home}/.claude/projects/${cwd.replace(/[/._:]/g, '-')}/${sid}.jsonl`;
 }
 
 /**

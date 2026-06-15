@@ -99,6 +99,8 @@ describe('claudeWorkerEnv', () => {
     const env = claudeWorkerEnv({});
     expect(env).toEqual({
       CLAUDE_CODE_SSE_PORT: '',
+      CLAUDE_CODE_SESSION_ID: '',
+      CLAUDE_CODE_CHILD_SESSION: '',
       CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: '',
       CLAUDE_CODE_USE_BEDROCK: '',
       CLAUDE_CODE_USE_VERTEX: '',
@@ -106,6 +108,24 @@ describe('claudeWorkerEnv', () => {
       CLAUDE_CODE_USE_ANTHROPIC_AWS: '',
       CLAUDE_CODE_USE_MANTLE: '',
     });
+  });
+
+  it('always pins the controller session-identity vars empty so a worker is its own session', () => {
+    // When csd runs inside a Claude session, the controller's session id +
+    // child-session marker leak via the tmux server env: SESSION_ID makes the
+    // worker hijack the controller's transcript, CHILD_SESSION suppresses the
+    // worker's own transcript. Pin both empty regardless of controller env.
+    for (const controller of [
+      {},
+      {
+        CLAUDE_CODE_SESSION_ID: 'controller-abc',
+        CLAUDE_CODE_CHILD_SESSION: '1',
+      },
+    ]) {
+      const env = claudeWorkerEnv(controller);
+      expect(env.CLAUDE_CODE_SESSION_ID).toBe('');
+      expect(env.CLAUDE_CODE_CHILD_SESSION).toBe('');
+    }
   });
 
   it('omits a provider var the controller has a non-empty value for', () => {

@@ -38,11 +38,28 @@ const CLAUDE_PROVIDER_ENV_VARS = [
  * `CLAUDE_CODE_SSE_PORT` is always pinned empty: it is the IDE socket port, only
  * ever a UI channel and never an auth channel, so a headless worker must not
  * auto-connect to the controller's IDE socket.
+ *
+ * `CLAUDE_CODE_SESSION_ID` and `CLAUDE_CODE_CHILD_SESSION` are always pinned empty:
+ * when csd is driven from INSIDE a Claude session, the tmux SERVER's global env
+ * carries the controller's session identity, and a worker must be an independent
+ * top-level session, not a continuation of the controller's. Each breaks session
+ * logs in a distinct way (verified live):
+ *  - `CLAUDE_CODE_SESSION_ID`: Claude honours it OVER the worker's `--session-id`
+ *    flag, so the worker writes its turns into the CONTROLLER's transcript
+ *    (`~/.claude/projects/<cwd>/<controller-id>.jsonl`), corrupting it.
+ *  - `CLAUDE_CODE_CHILD_SESSION`: marks the process a sub-session, which suppresses
+ *    its own transcript persistence entirely — so `read-turn`/`converse` find no
+ *    session log even once the id is correct.
+ * Pinning both empty makes the worker a clean session keyed by its `--session-id`.
  */
 export function claudeWorkerEnv(
   controllerEnv: NodeJS.ProcessEnv = process.env,
 ): Record<string, string> {
-  const env: Record<string, string> = { CLAUDE_CODE_SSE_PORT: '' };
+  const env: Record<string, string> = {
+    CLAUDE_CODE_SSE_PORT: '',
+    CLAUDE_CODE_SESSION_ID: '',
+    CLAUDE_CODE_CHILD_SESSION: '',
+  };
   for (const name of CLAUDE_PROVIDER_ENV_VARS) {
     if (!controllerEnv[name]) env[name] = '';
   }

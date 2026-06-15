@@ -328,7 +328,7 @@ describe('parsePiTurn / renderTurn', () => {
       { kind: 'prompt', text: 'do the thing' },
       { kind: 'thinking', text: 'let me think' },
       { kind: 'text', text: 'here is my answer' },
-      { kind: 'tool_use', name: 'read', input: { path: '/x' } },
+      { kind: 'tool_use', name: 'Read', input: { path: '/x' } },
       { kind: 'tool_result', content: 'file contents', isError: false },
     ]);
   });
@@ -360,7 +360,8 @@ describe('parsePiTurn / renderTurn', () => {
     expect(md).toContain('**Prompt:** do it');
     expect(md).toContain('> **Thinking:** hmm');
     expect(md).toContain('ok');
-    expect(md).toContain('**Tool: bash**');
+    // pi's lowercase tool name is canonicalized to the Bash/Read convention (N-4).
+    expect(md).toContain('**Tool: Bash**');
     expect(md).toContain('```json\n{"cmd":"ls"}\n```');
     expect(md).toContain('**Result:**');
     expect(md).toContain('out');

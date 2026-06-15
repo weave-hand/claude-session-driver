@@ -162,9 +162,10 @@ describe('csd pi extension — event mapping', () => {
     pi.fire('tool_call', TOOL_CALL, fakeCtx({}));
     const events = readEvents(eventsPath(dir, SID));
     expect(events).toHaveLength(1);
+    // pi's lowercase toolName is canonicalized to the Bash/Read convention (N-4).
     expect(events[0]).toMatchObject({
       event: 'pre_tool_use',
-      tool: 'bash',
+      tool: 'Bash',
       tool_input: { command: 'ls' },
     });
   });
@@ -175,7 +176,7 @@ describe('csd pi extension — event mapping', () => {
     pi.fire('tool_result', TOOL_RESULT, fakeCtx({}));
     const events = readEvents(eventsPath(dir, SID));
     expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({ event: 'post_tool_use', tool: 'bash' });
+    expect(events[0]).toMatchObject({ event: 'post_tool_use', tool: 'Bash' });
     expect(events[0]).not.toHaveProperty('tool_input');
   });
 

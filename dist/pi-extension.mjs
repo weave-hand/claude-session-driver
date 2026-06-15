@@ -24,6 +24,12 @@ function metaPath(dir, sid) {
 function isoSecondsUtc(date = /* @__PURE__ */ new Date()) {
   return date.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
+
+// src/core/tool-name.ts
+function canonicalToolName(name) {
+  if (typeof name !== "string" || name.length === 0) return "";
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
 function writeMeta(dir, meta) {
   mkdirSync(dir, { recursive: true });
   writeFileSync(metaPath(dir, meta.session_id), JSON.stringify(meta));
@@ -66,7 +72,7 @@ function csdPiExtension(pi) {
     record(ctx, {
       event: "pre_tool_use",
       ts: isoSecondsUtc(),
-      tool: event.toolName,
+      tool: canonicalToolName(event.toolName),
       tool_input: event.input
     });
   });
@@ -74,7 +80,7 @@ function csdPiExtension(pi) {
     record(ctx, {
       event: "post_tool_use",
       ts: isoSecondsUtc(),
-      tool: event.toolName
+      tool: canonicalToolName(event.toolName)
     });
   });
   pi.on("agent_end", (_event, ctx) => {

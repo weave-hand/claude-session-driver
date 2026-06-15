@@ -249,6 +249,7 @@ import type {
 import { appendEvent } from '../core/event-log.js';
 import { eventsPath, metaPath } from '../core/paths.js';
 import { isoSecondsUtc } from '../core/time.js';
+import { canonicalToolName } from '../core/tool-name.js';
 import { writeMeta } from '../core/worker-store.js';
 import type { WorkerEvent } from '../events.js';
 
@@ -334,7 +335,7 @@ export default function csdPiExtension(pi: ExtensionAPI): void {
     record(ctx, {
       event: 'pre_tool_use',
       ts: isoSecondsUtc(),
-      tool: event.toolName,
+      tool: canonicalToolName(event.toolName),
       tool_input: event.input,
     });
   });
@@ -343,7 +344,7 @@ export default function csdPiExtension(pi: ExtensionAPI): void {
     record(ctx, {
       event: 'post_tool_use',
       ts: isoSecondsUtc(),
-      tool: event.toolName,
+      tool: canonicalToolName(event.toolName),
     });
   });
 

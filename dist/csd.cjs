@@ -169,6 +169,12 @@ function removeOrphan(dir, name) {
   (0, import_node_fs3.rmSync)(workerHomePath(dir, name), { recursive: true, force: true });
 }
 
+// src/core/tool-name.ts
+function canonicalToolName(name) {
+  if (typeof name !== "string" || name.length === 0) return "";
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
 // src/core/transcript.ts
 var COMMAND_PREFIX = /^<(local-command|command-name)/;
 var NO_OUTPUT = "(no output)";
@@ -390,8 +396,11 @@ function collectPiAssistant(content, out) {
       out.push({ kind: "text", text });
     } else if (block.type === "toolCall") {
       const piBlock = block;
-      const name = typeof piBlock.name === "string" ? piBlock.name : "";
-      out.push({ kind: "tool_use", name, input: piBlock.arguments });
+      out.push({
+        kind: "tool_use",
+        name: canonicalToolName(piBlock.name),
+        input: piBlock.arguments
+      });
     }
   }
 }

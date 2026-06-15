@@ -12,6 +12,8 @@
  * is followed by one more `\n` — see `renderTurn`.
  */
 
+import { canonicalToolName } from './tool-name.js';
+
 export type TurnItem =
   | { kind: 'prompt'; text: string }
   | { kind: 'thinking'; text: string }
@@ -399,8 +401,11 @@ function collectPiAssistant(content: unknown, out: NormalizedTurn): void {
       out.push({ kind: 'text', text });
     } else if (block.type === 'toolCall') {
       const piBlock = block as PiMessage;
-      const name = typeof piBlock.name === 'string' ? piBlock.name : '';
-      out.push({ kind: 'tool_use', name, input: piBlock.arguments });
+      out.push({
+        kind: 'tool_use',
+        name: canonicalToolName(piBlock.name),
+        input: piBlock.arguments,
+      });
     }
   }
 }

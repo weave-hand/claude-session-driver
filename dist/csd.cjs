@@ -1596,7 +1596,9 @@ async function cmdStatus(ctx, worker) {
 }
 
 // src/commands/list.ts
-var HEADER = ["STATUS", "TMUX", "SESSION_ID", "SHIM", "CWD"].join("	");
+var HEADER = ["STATUS", "HARNESS", "TMUX", "SESSION_ID", "SHIM", "CWD"].join(
+  "	"
+);
 async function cmdList(ctx, opts) {
   const metas = listWorkers(ctx.workerDir);
   if (metas.length === 0) {
@@ -1610,6 +1612,7 @@ async function cmdList(ctx, opts) {
     rows.push(
       [
         status,
+        meta.harness,
         meta.tmux_name,
         meta.session_id,
         shimPath(ctx.workerDir, meta.tmux_name),

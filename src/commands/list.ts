@@ -10,7 +10,9 @@ export interface ListOpts {
   pattern?: string;
 }
 
-const HEADER = ['STATUS', 'TMUX', 'SESSION_ID', 'SHIM', 'CWD'].join('\t');
+const HEADER = ['STATUS', 'HARNESS', 'TMUX', 'SESSION_ID', 'SHIM', 'CWD'].join(
+  '\t',
+);
 
 /**
  * List the known workers as a TAB-separated table.
@@ -37,6 +39,7 @@ export async function cmdList(
     rows.push(
       [
         status,
+        meta.harness,
         meta.tmux_name,
         meta.session_id,
         shimPath(ctx.workerDir, meta.tmux_name),

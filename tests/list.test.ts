@@ -38,7 +38,7 @@ function makeCtx(workerDir: string, aliveNames: Set<string>): CommandContext {
   };
 }
 
-const HEADER = 'STATUS\tTMUX\tSESSION_ID\tSHIM\tCWD';
+const HEADER = 'STATUS\tHARNESS\tTMUX\tSESSION_ID\tSHIM\tCWD';
 
 describe('cmdList', () => {
   let workerDir: string;
@@ -84,10 +84,27 @@ describe('cmdList', () => {
     expect(lines[0]).toBe(HEADER);
     const rows = lines.slice(1);
     expect(rows).toContain(
-      `idle\talpha\tsid-a\t${shimPath(workerDir, 'alpha')}\t/work/a`,
+      `idle\tclaude\talpha\tsid-a\t${shimPath(workerDir, 'alpha')}\t/work/a`,
     );
     // beta is gone -> hidden by default.
     expect(result.stdout).not.toContain('beta');
+  });
+
+  it('shows the harness in its own column for a mixed fleet', async () => {
+    writeMeta(workerDir, {
+      tmux_name: 'cx',
+      session_id: 'sid-cx',
+      cwd: '/work/cx',
+      harness: 'codex',
+    });
+    appendEvent(eventsPath(workerDir, 'sid-cx'), {
+      event: 'stop',
+      ts: '2025-01-01T00:00:00Z',
+    });
+    const result = await cmdList(makeCtx(workerDir, new Set(['cx'])), {});
+    expect(result.stdout).toContain(
+      `idle\tcodex\tcx\tsid-cx\t${shimPath(workerDir, 'cx')}\t/work/cx`,
+    );
   });
 
   it('shows gone workers with --all', async () => {
@@ -101,7 +118,7 @@ describe('cmdList', () => {
     const result = await cmdList(ctx, { all: true });
     expect(result.code).toBe(0);
     expect(result.stdout).toContain(
-      `gone\tbeta\tsid-b\t${shimPath(workerDir, 'beta')}\t/work/b`,
+      `gone\tclaude\tbeta\tsid-b\t${shimPath(workerDir, 'beta')}\t/work/b`,
     );
   });
 

@@ -166,6 +166,7 @@ Prints attach instructions for a human to take over the tmux session.
 $SKILL/csd list                      # live workers (idle/working/terminated)
 $SKILL/csd list --all                # include 'gone' workers (tmux already exited)
 $SKILL/csd list api                  # substring filter on tmux name
+$SKILL/csd prune                     # remove dead workers + orphaned sidecars/shims
 ```
 
 ## Reference
@@ -174,13 +175,14 @@ $SKILL/csd list api                  # substring filter on tmux name
 csd launch [--harness <claude|codex|pi>] <tmux-name> <cwd> [-- harness-args...]
 csd adopt <tmux-name> <cwd> <session-id> [-- claude-args...]   # claude-only
 csd list [--all] [<pattern>]
+csd prune                          # remove dead/orphaned worker state
 csd grant-consent
 
 <shim> converse [--with-turn] <prompt> [timeout=120]
 <shim> send <prompt>
-<shim> wait-for-turn [timeout=60]
+<shim> wait-for-turn [timeout=60] [--after-line N]
 <shim> status
-<shim> read-events [--last N] [--type T] [--follow]
+<shim> read-events [--last N] [--type T] [--follow]   # --last caps the --follow backlog
 <shim> read-turn [--full]
 <shim> stop
 <shim> handoff
@@ -228,6 +230,10 @@ Don't trust worker B's summary of what it did — check the produced file. A wor
 
 `wait-for-turn` matches `stop` OR `session_end`, so it returns when the worker dies. Call `status` afterward: if it's `gone`, the worker crashed.
 
+### After a `converse` timeout, check `status` before `wait-for-turn`
+
+A bare `wait-for-turn` baselines at the *current* end of the events file and waits for the **next** turn-end. If a `converse` timed out, the worker often finishes during the gap — the `stop` has already landed, so a follow-up `wait-for-turn` blocks the entire timeout waiting for a turn that will never start. After a timeout, call `status` first: `idle` means the turn already ended (`read-turn` to read it); `working` means it's still going.
+
 ### Recovering workers after a reboot
 
 Worker runtime state (the `meta`/`events`/`shim` files under `/tmp/csd-workers`) lives in `/tmp`, which macOS clears on reboot — and the tmux panes die with it. But the *conversations* survive: Claude Code persists each session transcript at `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`. `csd adopt` brings one back as a live, driveable worker (this is **claude-only** — Codex and Pi mint their own session ids and offer no resume-by-id, so relaunch those instead):
@@ -236,6 +242,8 @@ Worker runtime state (the `meta`/`events`/`shim` files under `/tmp/csd-workers`)
 $SKILL/csd adopt my-task /path/to/project <session-id>
 # stdout: /tmp/csd-workers/bin/my-task   (same shim contract as launch)
 ```
+
+**This is claude-only — codex/pi conversations do NOT survive `stop`.** Codex and Pi run under a staged per-worker home at `/tmp/csd-workers/homes/<name>/` (config, auth, and the rollout/session transcript), *not* your real `~/.codex` / `~/.pi`. `stop` removes that home, so the transcript is gone and there is no recovery path — relaunch starts a fresh session. Only claude persists its transcript outside the worker dir (in `~/.claude/projects`), which is why only claude is adoptable.
 
 `adopt` pre-writes the meta keyed by `<session-id>`, starts `claude --resume <session-id>` (which preserves the id, so the worker emits events normally), and writes the shim — so the resumed conversation is fully driveable (`converse`/`status`/`read-turn`/…), with all prior context intact. If a tmux session of that name already exists (e.g. restored by [tmux-resurrect](https://github.com/tmux-plugins/tmux-resurrect) / tmux-continuum), `adopt` respawns its pane *in place*, preserving the restored layout; otherwise it opens a new one.
 
@@ -271,6 +279,8 @@ The `csd` CLI honors a small set of env vars. All are optional.
 | `CSD_CODEX_MODEL` / `CSD_PI_MODEL` | Optional model override for codex / pi workers. Unset = the harness default (codex: `gpt-5.5`; pi: its configured default). |
 | `CSD_CONVERSE_DIAG_FILE` | When set, `csd converse` writes a post-mortem diagnostic on timeout — `ps` tree, `tmux capture-pane`, last 30 lines of the worker's session JSONL, last 20 lines of the csd events JSONL — to this path, then emits a `csd-diagnostic: <path>` pointer to stderr. The file is overwritten on each timeout. Unset = no diagnostic file. Useful when wrapping csd in a harness that can ship the file off-box before the worker is reaped. |
 | `CSD_WORKER_DIR` | Override the worker dir (default `/tmp/csd-workers`). The back-compat `/tmp/claude-workers` symlink is only created when the default is in use. |
+| `CSD_SUBMIT_TIMEOUT` / `CSD_SUBMIT_RETRY_INTERVAL` | `send`: seconds to wait for the worker to confirm a pasted prompt (default `10`) and seconds between retry-Enter resends (default `2`). Raise the timeout if a slow tmux session drops the paste. |
+| `CSD_REGISTER_TIMEOUT` | Seconds the FIRST `send`/`converse` to a derive worker (codex/pi) waits for it to self-register its session id (default `15`). |
 | `HOME` | Used to locate `~/.claude/projects/<encoded-cwd>/<sid>.jsonl` (claude) and the one-time consent file (`~/.claude/.claude-session-driver-consent`). |
 
 `csd help` shows the same surface.

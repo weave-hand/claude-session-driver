@@ -236,6 +236,20 @@ function findCodexBoundary(lines: RolloutLine[]): number {
   return 0;
 }
 
+/**
+ * Codex names its shell tool `exec_command` in the rollout, but its hook payload
+ * (and thus the csd event stream) reports the canonical `Bash`. Map rollout names
+ * onto the same vocabulary so `read-turn` and `read-events` agree for the same
+ * call; pass anything unmapped through (the native name beats a wrong guess).
+ */
+const CODEX_TOOL_NAMES: Record<string, string> = {
+  exec_command: 'Bash',
+};
+
+function canonicalCodexTool(name: string): string {
+  return CODEX_TOOL_NAMES[name] ?? name;
+}
+
 export function parseCodexTurn(jsonl: string): NormalizedTurn {
   const lines = parseRolloutLines(jsonl);
   if (lines.length === 0) return [];
@@ -252,7 +266,7 @@ export function parseCodexTurn(jsonl: string): NormalizedTurn {
     } else if (p.type === 'reasoning') {
       turn.push({ kind: 'thinking', text: reasoningText(p.summary) });
     } else if (p.type === 'function_call') {
-      const name = typeof p.name === 'string' ? p.name : '';
+      const name = canonicalCodexTool(typeof p.name === 'string' ? p.name : '');
       turn.push({ kind: 'tool_use', name, input: p.arguments });
     } else if (p.type === 'function_call_output') {
       turn.push({

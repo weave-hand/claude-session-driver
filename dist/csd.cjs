@@ -278,6 +278,12 @@ function findCodexBoundary(lines) {
   }
   return 0;
 }
+var CODEX_TOOL_NAMES = {
+  exec_command: "Bash"
+};
+function canonicalCodexTool(name) {
+  return CODEX_TOOL_NAMES[name] ?? name;
+}
 function parseCodexTurn(jsonl) {
   const lines = parseRolloutLines(jsonl);
   if (lines.length === 0) return [];
@@ -293,7 +299,7 @@ function parseCodexTurn(jsonl) {
     } else if (p.type === "reasoning") {
       turn.push({ kind: "thinking", text: reasoningText(p.summary) });
     } else if (p.type === "function_call") {
-      const name = typeof p.name === "string" ? p.name : "";
+      const name = canonicalCodexTool(typeof p.name === "string" ? p.name : "");
       turn.push({ kind: "tool_use", name, input: p.arguments });
     } else if (p.type === "function_call_output") {
       turn.push({

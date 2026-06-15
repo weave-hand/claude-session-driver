@@ -1,9 +1,34 @@
 import { describe, expect, it } from 'vitest';
 import {
   parseClaudeTurn,
+  parseCodexTurn,
   parsePiTurn,
   renderTurn,
 } from '../src/core/transcript.js';
+
+describe('parseCodexTurn / renderTurn', () => {
+  const userLine =
+    '{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"go"}]}}';
+
+  it('normalizes codex exec_command to the canonical Bash (matches the event stream)', () => {
+    const lines = [
+      userLine,
+      '{"type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":{"cmd":"ls"}}}',
+    ].join('\n');
+    const md = renderTurn(parseCodexTurn(lines), { full: false });
+    expect(md).toContain('**Tool: Bash**\n```json\n{"cmd":"ls"}\n```\n');
+    expect(md).not.toContain('exec_command');
+  });
+
+  it('passes an unmapped codex tool name through unchanged', () => {
+    const lines = [
+      userLine,
+      '{"type":"response_item","payload":{"type":"function_call","name":"apply_patch","arguments":"PATCH"}}',
+    ].join('\n');
+    const md = renderTurn(parseCodexTurn(lines), { full: false });
+    expect(md).toContain('**Tool: apply_patch**');
+  });
+});
 
 describe('parseClaudeTurn / renderTurn', () => {
   it('renders the last turn with truncated tool result', () => {

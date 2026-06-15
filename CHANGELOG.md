@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [4.0.0] - 2026-06-14
 
 ### Changed
 - Rewrote `csd` from bash to a TypeScript core. The published plugin now ships
@@ -36,6 +36,18 @@
   `CSD_CLAUDE_BIN`; defaults resolved via `PATH`).
 - `CSD_CODEX_MODEL` / `CSD_PI_MODEL` — optional model override for codex / pi
   workers (unset = the harness default; codex's is `gpt-5.5`).
+- `csd prune` — sweep dead worker state in one pass: every registered worker
+  whose tmux session is `gone` (the bulk equivalent of `stop`), plus meta-less
+  leftover sidecars/shims whose tmux session is also gone (orphans from workers
+  that bypassed `stop`, invisible to `list`). Live workers — including derive
+  workers still in their pre-registration window — are left alone.
+- `csd list` gains a `HARNESS` column and emits an `unregistered` row for each
+  derive worker (codex/pi) that has launched but not yet minted its session id
+  (live tmux + `.harness` sidecar, no meta). Prints `No workers found` when
+  nothing matches instead of a bare header.
+- `csd read-events --last N` works under `--follow` too: it caps the replayed
+  backlog to the last N matching events before streaming new ones (`--last 0`
+  skips the backlog entirely and follows only new events).
 
 ## [3.0.2] - 2026-05-31
 

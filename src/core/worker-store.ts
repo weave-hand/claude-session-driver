@@ -7,7 +7,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
   eventsPath,
   harnessMarkerPath,
@@ -98,5 +98,35 @@ export function removeWorker(dir: string, sid: string, name: string): void {
   rmSync(harnessMarkerPath(dir, name), { force: true });
   // The per-worker home (codex/pi staged the operator's auth.json here during
   // prepare); remove it recursively so stop leaves no staged credentials behind.
+  rmSync(workerHomePath(dir, name), { recursive: true, force: true });
+}
+
+/**
+ * tmux-names that have a leftover `.harness` sidecar or shim but NO registered
+ * `<sid>.meta` — orphans from workers that bypassed `stop` (crash, killed tmux,
+ * old fixtures). `list` can't see them (it keys off meta) and the gone-worker
+ * scan misses them (no meta). A live derive worker in its pre-registration
+ * window also has no meta yet, so callers must gate removal on the tmux session
+ * being gone.
+ */
+export function listOrphanNames(dir: string): string[] {
+  const registered = new Set(listWorkers(dir).map((m) => m.tmux_name));
+  const names = new Set<string>();
+  if (existsSync(dir)) {
+    for (const f of readdirSync(dir)) {
+      if (f.endsWith('.harness')) names.add(f.slice(0, -'.harness'.length));
+    }
+  }
+  const bin = join(dir, 'bin');
+  if (existsSync(bin)) {
+    for (const f of readdirSync(bin)) names.add(f);
+  }
+  return [...names].filter((n) => !registered.has(n));
+}
+
+/** Remove a meta-less worker's leftover sidecar/shim/home (orphan cleanup). */
+export function removeOrphan(dir: string, name: string): void {
+  rmSync(shimPath(dir, name), { force: true });
+  rmSync(harnessMarkerPath(dir, name), { force: true });
   rmSync(workerHomePath(dir, name), { recursive: true, force: true });
 }

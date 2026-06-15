@@ -149,6 +149,25 @@ function removeWorker(dir, sid, name) {
   (0, import_node_fs3.rmSync)(harnessMarkerPath(dir, name), { force: true });
   (0, import_node_fs3.rmSync)(workerHomePath(dir, name), { recursive: true, force: true });
 }
+function listOrphanNames(dir) {
+  const registered = new Set(listWorkers(dir).map((m) => m.tmux_name));
+  const names = /* @__PURE__ */ new Set();
+  if ((0, import_node_fs3.existsSync)(dir)) {
+    for (const f of (0, import_node_fs3.readdirSync)(dir)) {
+      if (f.endsWith(".harness")) names.add(f.slice(0, -".harness".length));
+    }
+  }
+  const bin = (0, import_node_path2.join)(dir, "bin");
+  if ((0, import_node_fs3.existsSync)(bin)) {
+    for (const f of (0, import_node_fs3.readdirSync)(bin)) names.add(f);
+  }
+  return [...names].filter((n) => !registered.has(n));
+}
+function removeOrphan(dir, name) {
+  (0, import_node_fs3.rmSync)(shimPath(dir, name), { force: true });
+  (0, import_node_fs3.rmSync)(harnessMarkerPath(dir, name), { force: true });
+  (0, import_node_fs3.rmSync)(workerHomePath(dir, name), { recursive: true, force: true });
+}
 
 // src/core/transcript.ts
 var COMMAND_PREFIX = /^<(local-command|command-name)/;
@@ -1649,18 +1668,22 @@ async function cmdList(ctx, opts) {
 
 // src/commands/prune.ts
 async function cmdPrune(ctx) {
-  const metas = listWorkers(ctx.workerDir);
-  const pruned = [];
-  for (const meta of metas) {
+  const removed = [];
+  for (const meta of listWorkers(ctx.workerDir)) {
     if (await computeStatus(ctx, meta) !== "gone") continue;
     removeWorker(ctx.workerDir, meta.session_id, meta.tmux_name);
-    pruned.push(meta.tmux_name);
+    removed.push(meta.tmux_name);
   }
-  if (pruned.length === 0) {
-    return { stderr: "No gone workers to prune", code: 0 };
+  for (const name of listOrphanNames(ctx.workerDir)) {
+    if (await ctx.tmux.hasSession(name)) continue;
+    removeOrphan(ctx.workerDir, name);
+    removed.push(name);
+  }
+  if (removed.length === 0) {
+    return { stderr: "Nothing to prune", code: 0 };
   }
   return {
-    stdout: `Pruned ${pruned.length} gone worker(s): ${pruned.join(", ")}`,
+    stdout: `Pruned ${removed.length} dead worker(s)/orphan(s): ${removed.join(", ")}`,
     code: 0
   };
 }

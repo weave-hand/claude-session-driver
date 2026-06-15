@@ -4,9 +4,13 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { CommandContext } from '../src/commands/context.js';
 import { cmdPrune } from '../src/commands/prune.js';
-import { metaPath } from '../src/core/paths.js';
+import { harnessMarkerPath, metaPath, shimPath } from '../src/core/paths.js';
 import { makeTmux } from '../src/core/tmux.js';
-import { writeMeta } from '../src/core/worker-store.js';
+import {
+  writeHarnessMarker,
+  writeMeta,
+  writeShim,
+} from '../src/core/worker-store.js';
 import { getDriver } from '../src/harness/registry.js';
 
 /** A session is alive iff its name is in `alive` (decided by the has-session -t arg). */
@@ -60,7 +64,26 @@ describe('cmdPrune', () => {
     mk('alive1', 'sid-a');
     const result = await cmdPrune(makeCtx(dir, new Set(['alive1'])));
     expect(result.code).toBe(0);
-    expect(result.stderr).toBe('No gone workers to prune');
+    expect(result.stderr).toBe('Nothing to prune');
     expect(result.stdout).toBeUndefined();
+  });
+
+  it('sweeps meta-less orphan sidecars/shims whose tmux is gone, keeps live ones (N-3)', async () => {
+    // Orphan: a .harness sidecar + shim with no meta, tmux session dead.
+    writeHarnessMarker(dir, 'orphan', 'codex');
+    writeShim(dir, 'orphan', '/dist/csd.cjs');
+    // A live derive worker mid-registration: same shape, but tmux still alive.
+    writeHarnessMarker(dir, 'pending', 'codex');
+    writeShim(dir, 'pending', '/dist/csd.cjs');
+
+    const result = await cmdPrune(makeCtx(dir, new Set(['pending'])));
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain('orphan');
+    // orphan removed, pending (live) untouched.
+    expect(existsSync(harnessMarkerPath(dir, 'orphan'))).toBe(false);
+    expect(existsSync(shimPath(dir, 'orphan'))).toBe(false);
+    expect(existsSync(harnessMarkerPath(dir, 'pending'))).toBe(true);
+    expect(existsSync(shimPath(dir, 'pending'))).toBe(true);
   });
 });

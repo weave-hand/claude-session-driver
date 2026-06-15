@@ -137,6 +137,9 @@ export const codex: HarnessDriver = {
   controlPlane: 'hooks',
   idStrategy: 'derive',
   quitKeys: '/quit',
+  // Codex neither emits session_end nor exits on its quit keys, so the wait is
+  // always wasted — kill quickly instead of burning the full backstop.
+  stopGraceSeconds: 2,
 
   bin(): string {
     return process.env.CSD_CODEX_BIN ?? 'codex';

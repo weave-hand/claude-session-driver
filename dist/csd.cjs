@@ -484,6 +484,7 @@ var claude = {
   controlPlane: "hooks",
   idStrategy: "assign",
   quitKeys: "/exit",
+  stopGraceSeconds: 10,
   bin() {
     return process.env.CSD_CLAUDE_BIN ?? "claude";
   },
@@ -622,6 +623,9 @@ var codex = {
   controlPlane: "hooks",
   idStrategy: "derive",
   quitKeys: "/quit",
+  // Codex neither emits session_end nor exits on its quit keys, so the wait is
+  // always wasted — kill quickly instead of burning the full backstop.
+  stopGraceSeconds: 2,
   bin() {
     return process.env.CSD_CODEX_BIN ?? "codex";
   },
@@ -711,6 +715,7 @@ var pi = {
   controlPlane: "extension",
   idStrategy: "derive",
   quitKeys: "/quit",
+  stopGraceSeconds: 10,
   bin() {
     return process.env.CSD_PI_BIN ?? "pi";
   },
@@ -1744,7 +1749,7 @@ async function cmdStop(ctx, worker, opts = {}) {
   if ("code" in resolved) return resolved;
   const { sid, meta } = resolved;
   const tmuxName = meta.tmux_name;
-  const stopTimeout = opts.stopTimeout ?? 10;
+  const stopTimeout = opts.stopTimeout ?? ctx.driver.stopGraceSeconds;
   const pollMs = opts.pollMs ?? 500;
   const settleMs = opts.settleMs ?? 1e3;
   const eventFile = eventsPath(ctx.workerDir, sid);
@@ -1757,6 +1762,7 @@ async function cmdStop(ctx, worker, opts = {}) {
         await sleep7(settleMs);
         break;
       }
+      if (!await ctx.tmux.hasSession(tmuxName)) break;
       await sleep7(pollMs);
     }
     if (await ctx.tmux.hasSession(tmuxName)) {

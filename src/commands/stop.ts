@@ -41,7 +41,7 @@ export async function cmdStop(
   const { sid, meta } = resolved;
   const tmuxName = meta.tmux_name;
 
-  const stopTimeout = opts.stopTimeout ?? 10;
+  const stopTimeout = opts.stopTimeout ?? ctx.driver.stopGraceSeconds;
   const pollMs = opts.pollMs ?? 500;
   const settleMs = opts.settleMs ?? 1000;
   const eventFile = eventsPath(ctx.workerDir, sid);
@@ -56,6 +56,11 @@ export async function cmdStop(
         await sleep(settleMs);
         break;
       }
+      // Some harnesses (e.g. codex) exit the pane outright on quit without
+      // emitting session_end. Stop waiting the instant the session is gone
+      // rather than burning the full grace — harness-agnostic and never less
+      // safe (the post-loop check still force-kills a survivor).
+      if (!(await ctx.tmux.hasSession(tmuxName))) break;
       await sleep(pollMs);
     }
 

@@ -71,6 +71,7 @@ export const claude: HarnessDriver = {
   controlPlane: 'hooks',
   idStrategy: 'assign',
   quitKeys: '/exit',
+  stopGraceSeconds: 10,
 
   bin(): string {
     return process.env.CSD_CLAUDE_BIN ?? 'claude';

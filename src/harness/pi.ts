@@ -75,6 +75,7 @@ export const pi: HarnessDriver = {
   controlPlane: 'extension',
   idStrategy: 'derive',
   quitKeys: '/quit',
+  stopGraceSeconds: 10,
 
   bin(): string {
     return process.env.CSD_PI_BIN ?? 'pi';

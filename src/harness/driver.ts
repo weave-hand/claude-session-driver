@@ -41,6 +41,15 @@ export interface HarnessDriver {
   /** The keystrokes/command that quit the harness (e.g. `/exit`). */
   quitKeys: string;
 
+  /**
+   * Seconds `stop` waits for a `session_end` (or the pane to exit) after sending
+   * the quit keys, before force-killing the tmux session. Harnesses that quit
+   * cleanly (claude `/exit`, pi) keep a generous backstop; codex neither emits
+   * `session_end` nor exits on its quit keys, so it uses a short grace to avoid
+   * burning the full wait on every stop.
+   */
+  stopGraceSeconds: number;
+
   /** The binary to invoke (honours any per-harness override env var). */
   bin(): string;
 

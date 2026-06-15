@@ -223,6 +223,72 @@ describe('cmdStop', () => {
     });
   });
 
+  it('stops promptly when the worker self-exits on quit, without waiting the full grace (RE-10)', async () => {
+    const calls: FakeTmuxCalls = {
+      sendText: [],
+      sendEnter: [],
+      killSession: [],
+    };
+    // Quit keys exit the pane outright (codex-style): the session disappears, but
+    // NO session_end event is ever emitted. stop must notice the pane is gone and
+    // return immediately rather than burning the whole grace.
+    let alive = true;
+    const tmux = fakeTmux(
+      () => alive,
+      calls,
+      () => {
+        alive = false;
+      },
+    );
+    const ctx = makeCtx(workerDir, tmux);
+    const start = Date.now();
+    const result = await cmdStop(ctx, SID, {
+      stopTimeout: 2,
+      pollMs: 10,
+      settleMs: 0,
+    });
+    const elapsed = Date.now() - start;
+
+    expect(result.code).toBe(0);
+    expect(elapsed).toBeLessThan(1000); // broke out, did not wait the 2s grace
+    expect(calls.killSession).toHaveLength(0); // already gone -> no force-kill
+    expect(filesExist(workerDir)).toEqual({
+      meta: false,
+      events: false,
+      shim: false,
+    });
+  });
+
+  it('defaults the grace to the driver stopGraceSeconds when no timeout is given (RE-10)', async () => {
+    const calls: FakeTmuxCalls = {
+      sendText: [],
+      sendEnter: [],
+      killSession: [],
+    };
+    // Session never emits session_end and stays alive (codex-style). With a short
+    // driver grace and NO explicit stopTimeout, stop must force-kill quickly
+    // instead of waiting the 10s default.
+    const tmux = fakeTmux(() => true, calls);
+    const driver = { ...getDriver('claude'), stopGraceSeconds: 0.05 };
+    const ctx: CommandContext = { workerDir, home: workerDir, tmux, driver };
+    const start = Date.now();
+    const result = await cmdStop(ctx, SID, { pollMs: 5 });
+    const elapsed = Date.now() - start;
+
+    expect(result.code).toBe(0);
+    expect(elapsed).toBeLessThan(1000); // used the 0.05s grace, not the 10s default
+    expect(calls.killSession).toEqual([TMUX_NAME]);
+  });
+
+  it('gives codex a shorter stop grace than the cleanly-quitting harnesses (RE-10)', () => {
+    expect(getDriver('codex').stopGraceSeconds).toBeLessThan(
+      getDriver('claude').stopGraceSeconds,
+    );
+    expect(getDriver('codex').stopGraceSeconds).toBeLessThan(
+      getDriver('pi').stopGraceSeconds,
+    );
+  });
+
   it('removes the per-worker home (staged operator credentials) on stop', async () => {
     // A derive worker stages the operator's auth in a per-worker home.
     const home = workerHomePath(workerDir, TMUX_NAME);

@@ -70,6 +70,7 @@ export const claude: HarnessDriver = {
   id: 'claude',
   controlPlane: 'hooks',
   idStrategy: 'assign',
+  registersIdAtLaunch: true,
   quitKeys: '/exit',
   stopGraceSeconds: 10,
 

@@ -38,6 +38,14 @@ export interface HarnessDriver {
    */
   idStrategy: 'assign' | 'derive';
 
+  /**
+   * Whether the worker's session id is known by the time `launch` returns. True
+   * for claude (caller-assigned) and pi (registers synchronously at launch);
+   * false for codex (registers only on its first prompt). Lets the launch panel
+   * show the real id for harnesses that have it, vs a placeholder for codex.
+   */
+  registersIdAtLaunch: boolean;
+
   /** The keystrokes/command that quit the harness (e.g. `/exit`). */
   quitKeys: string;
 

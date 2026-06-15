@@ -10,6 +10,7 @@ import {
 import { shellQuote } from '../core/shell.js';
 import { isoSecondsUtc } from '../core/time.js';
 import {
+  resolveSession,
   writeHarnessMarker,
   writeMeta,
   writeShim,
@@ -287,16 +288,22 @@ async function launchDerive(
   }
 
   const shim = writeShim(ctx.workerDir, tmuxName, opts.csdEntry);
-  // A derive harness mints its own id (codex on its first prompt, pi at launch),
-  // so don't claim a specific timing here — query `session-id`/`events-file` once
-  // the worker has registered (RE-5b: the old "on first prompt" was wrong for pi).
+  // A launch-registering derive harness (pi) already has its real id by now; show
+  // it. Codex registers only on its first prompt, so it gets the placeholder
+  // (N-2 / RE-5b — the old "on first prompt" was wrong for pi).
+  const registeredSid = driver.registersIdAtLaunch
+    ? resolveSession(ctx.workerDir, tmuxName)
+    : null;
   const panel = renderPanel({
     header: 'Worker launched.',
     verb: 'launch',
     tmuxName,
-    sessionId: '(derive — minted by the harness on registration)',
+    sessionId:
+      registeredSid ?? '(derive — minted by the harness on registration)',
     cwd,
-    eventsFile: '(available after the worker registers)',
+    eventsFile: registeredSid
+      ? eventsPath(ctx.workerDir, registeredSid)
+      : '(available after the worker registers)',
     csdPath: opts.csdPath,
     invocation,
   });

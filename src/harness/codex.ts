@@ -136,6 +136,7 @@ export const codex: HarnessDriver = {
   id: 'codex',
   controlPlane: 'hooks',
   idStrategy: 'derive',
+  registersIdAtLaunch: false,
   quitKeys: '/quit',
   // Codex neither emits session_end nor exits on its quit keys, so the wait is
   // always wasted — kill quickly instead of burning the full backstop.

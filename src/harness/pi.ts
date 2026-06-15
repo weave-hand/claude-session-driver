@@ -74,6 +74,7 @@ export const pi: HarnessDriver = {
   id: 'pi',
   controlPlane: 'extension',
   idStrategy: 'derive',
+  registersIdAtLaunch: true,
   quitKeys: '/quit',
   stopGraceSeconds: 10,
 

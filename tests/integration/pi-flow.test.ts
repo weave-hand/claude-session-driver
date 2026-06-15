@@ -163,13 +163,11 @@ describe.skipIf(!HAS_TMUX)('pi flow e2e (real tmux + bundled csd)', () => {
     expect(existsSync(shim)).toBe(true);
     expect(statSync(shim).mode & 0o100).toBeTruthy();
 
-    // The derive panel doesn't claim a specific id-assignment timing.
-    expect(panel).toContain(
-      'session_id: (derive — minted by the harness on registration)',
-    );
-    expect(panel).toContain(
-      'events:     (available after the worker registers)',
-    );
+    // pi registers its id at launch, so the panel shows the real id + events path
+    // (not the derive placeholder) (N-2).
+    expect(panel).toMatch(/session_id: [0-9a-f][0-9a-f-]{7,}/);
+    expect(panel).toContain('.events.jsonl');
+    expect(panel).not.toContain('(derive');
 
     // The tmux session is live and the sidecar harness marker exists.
     expect(hasSession(tmuxName)).toBe(true);

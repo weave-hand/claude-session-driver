@@ -484,6 +484,7 @@ var claude = {
   id: "claude",
   controlPlane: "hooks",
   idStrategy: "assign",
+  registersIdAtLaunch: true,
   quitKeys: "/exit",
   stopGraceSeconds: 10,
   bin() {
@@ -623,6 +624,7 @@ var codex = {
   id: "codex",
   controlPlane: "hooks",
   idStrategy: "derive",
+  registersIdAtLaunch: false,
   quitKeys: "/quit",
   // Codex neither emits session_end nor exits on its quit keys, so the wait is
   // always wasted — kill quickly instead of burning the full backstop.
@@ -715,6 +717,7 @@ var pi = {
   id: "pi",
   controlPlane: "extension",
   idStrategy: "derive",
+  registersIdAtLaunch: true,
   quitKeys: "/quit",
   stopGraceSeconds: 10,
   bin() {
@@ -1085,13 +1088,14 @@ async function launchDerive(ctx, { driver, tmuxName, cwd, extraArgs, invocation 
     });
   }
   const shim = writeShim(ctx.workerDir, tmuxName, opts.csdEntry);
+  const registeredSid = driver.registersIdAtLaunch ? resolveSession(ctx.workerDir, tmuxName) : null;
   const panel = renderPanel({
     header: "Worker launched.",
     verb: "launch",
     tmuxName,
-    sessionId: "(derive \u2014 minted by the harness on registration)",
+    sessionId: registeredSid ?? "(derive \u2014 minted by the harness on registration)",
     cwd,
-    eventsFile: "(available after the worker registers)",
+    eventsFile: registeredSid ? eventsPath(ctx.workerDir, registeredSid) : "(available after the worker registers)",
     csdPath: opts.csdPath,
     invocation
   });

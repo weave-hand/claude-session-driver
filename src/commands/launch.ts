@@ -90,13 +90,19 @@ export function renderPanel(opts: {
   invocation: string[];
 }): string {
   const reproduceArgs = opts.invocation.map(shellQuote).join(' ');
+  // The default csd path is the bundle (`dist/csd.cjs`) — a plain file with no
+  // shebang and not +x, so a bare path isn't runnable. Prefix `node` for a JS
+  // entry; a non-JS CSD_PATH wrapper override is used as-is (RE-2).
+  const runnableCsd = /\.[cm]?js$/.test(opts.csdPath)
+    ? `node ${shellQuote(opts.csdPath)}`
+    : shellQuote(opts.csdPath);
   return [
     opts.header,
     `  tmux:       ${opts.tmuxName}`,
     `  session_id: ${opts.sessionId}`,
     `  cwd:        ${opts.cwd}`,
     `  events:     ${opts.eventsFile}`,
-    `  reproduce: ${shellQuote(opts.csdPath)} ${opts.verb} ${reproduceArgs}`,
+    `  reproduce: ${runnableCsd} ${opts.verb} ${reproduceArgs}`,
   ].join('\n');
 }
 
@@ -281,13 +287,16 @@ async function launchDerive(
   }
 
   const shim = writeShim(ctx.workerDir, tmuxName, opts.csdEntry);
+  // A derive harness mints its own id (codex on its first prompt, pi at launch),
+  // so don't claim a specific timing here — query `session-id`/`events-file` once
+  // the worker has registered (RE-5b: the old "on first prompt" was wrong for pi).
   const panel = renderPanel({
     header: 'Worker launched.',
     verb: 'launch',
     tmuxName,
-    sessionId: '(derive — assigned on first prompt)',
+    sessionId: '(derive — minted by the harness on registration)',
     cwd,
-    eventsFile: '(registered on first prompt)',
+    eventsFile: '(available after the worker registers)',
     csdPath: opts.csdPath,
     invocation,
   });

@@ -418,6 +418,7 @@ function renderItem(item, full) {
 **Prompt:** ${item.text}
 `;
     case "thinking":
+      if (item.text.trim() === "") return "";
       return `> **Thinking:** ${item.text.split("\n").join("\n> ")}
 `;
     case "text":
@@ -990,13 +991,14 @@ function resolveCwd(cwd) {
 }
 function renderPanel(opts) {
   const reproduceArgs = opts.invocation.map(shellQuote).join(" ");
+  const runnableCsd = /\.[cm]?js$/.test(opts.csdPath) ? `node ${shellQuote(opts.csdPath)}` : shellQuote(opts.csdPath);
   return [
     opts.header,
     `  tmux:       ${opts.tmuxName}`,
     `  session_id: ${opts.sessionId}`,
     `  cwd:        ${opts.cwd}`,
     `  events:     ${opts.eventsFile}`,
-    `  reproduce: ${shellQuote(opts.csdPath)} ${opts.verb} ${reproduceArgs}`
+    `  reproduce: ${runnableCsd} ${opts.verb} ${reproduceArgs}`
   ].join("\n");
 }
 function deriveWorkerHome(workerDir2, tmuxName) {
@@ -1087,9 +1089,9 @@ async function launchDerive(ctx, { driver, tmuxName, cwd, extraArgs, invocation 
     header: "Worker launched.",
     verb: "launch",
     tmuxName,
-    sessionId: "(derive \u2014 assigned on first prompt)",
+    sessionId: "(derive \u2014 minted by the harness on registration)",
     cwd,
-    eventsFile: "(registered on first prompt)",
+    eventsFile: "(available after the worker registers)",
     csdPath: opts.csdPath,
     invocation
   });
@@ -1951,6 +1953,14 @@ Environment variables:
                        tmux capture-pane + worker session JSONL tail + csd events tail)
                        to this path on timeout, then emits "csd-diagnostic: <path>" to
                        stderr. Overwritten on each timeout. Unset = no diagnostic file.
+  CSD_WORKER_DIR       Directory for worker runtime state (meta/events/shim).
+                       Default: /tmp/csd-workers.
+  CSD_SUBMIT_TIMEOUT / CSD_SUBMIT_RETRY_INTERVAL
+                       \`send\`: seconds to wait for the worker to confirm a pasted
+                       prompt (default 10) and seconds between retry-Enter resends
+                       (default 2).
+  CSD_REGISTER_TIMEOUT Seconds the FIRST \`send\` to a derive worker (codex/pi) waits
+                       for it to self-register its session id (default 15).
   HOME                 Used to locate ~/.claude/projects/<encoded-cwd>/<sid>.jsonl and
                        the one-time consent file (~/.claude/.claude-session-driver-consent).
 `;
@@ -2160,7 +2170,7 @@ async function run2(argv, io = realIo) {
         i += 1;
       }
       const prompt = args[i];
-      if (prompt === void 0) {
+      if (prompt === void 0 || prompt.trim() === "") {
         io.err("Usage: converse [--with-turn] <prompt> [timeout=120]\n");
         return 1;
       }
@@ -2176,7 +2186,7 @@ async function run2(argv, io = realIo) {
     }
     case "send": {
       const prompt = args[0];
-      if (prompt === void 0) {
+      if (prompt === void 0 || prompt.trim() === "") {
         io.err("Usage: send <prompt-text>\n");
         return 1;
       }

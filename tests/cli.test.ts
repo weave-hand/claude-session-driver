@@ -69,6 +69,20 @@ describe('run — validation and dispatch', () => {
     expect(err()).toContain('Error: --worker requires a value');
   });
 
+  it('rejects an empty send prompt up front, not after the submit timeout (RE-3)', async () => {
+    const { io, err } = makeIo();
+    const code = await run(['--worker', 'w', 'send', ''], io);
+    expect(code).toBe(1);
+    expect(err()).toContain('Usage: send');
+  });
+
+  it('rejects an empty converse prompt up front (RE-3)', async () => {
+    const { io, err } = makeIo();
+    const code = await run(['--worker', 'w', 'converse', ''], io);
+    expect(code).toBe(1);
+    expect(err()).toContain('Usage: converse');
+  });
+
   it('rejects an unknown subcommand with usage', async () => {
     const { io, err } = makeIo();
     const code = await run(['bogus'], io);

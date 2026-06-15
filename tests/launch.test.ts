@@ -10,7 +10,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { CommandContext } from '../src/commands/context.js';
-import { cmdLaunch, deriveWorkerHome } from '../src/commands/launch.js';
+import {
+  cmdLaunch,
+  deriveWorkerHome,
+  renderPanel,
+} from '../src/commands/launch.js';
 import { grantConsent } from '../src/core/consent.js';
 import { appendEvent } from '../src/core/event-log.js';
 import { eventsPath, shimPath } from '../src/core/paths.js';
@@ -447,9 +451,11 @@ describe('cmdLaunch — codex (derive)', () => {
     expect(result.stderr).toContain('Worker launched.');
     expect(result.stderr).toContain('tmux:       cx1');
     expect(result.stderr).toContain(
-      'session_id: (derive — assigned on first prompt)',
+      'session_id: (derive — minted by the harness on registration)',
     );
-    expect(result.stderr).toContain('events:     (registered on first prompt)');
+    expect(result.stderr).toContain(
+      'events:     (available after the worker registers)',
+    );
 
     // prepare wrote the per-worker CODEX_HOME config.
     expect(
@@ -478,5 +484,28 @@ describe('cmdLaunch — codex (derive)', () => {
     // No keystrokes sent (the gate never matched).
     expect(calls.sendText).toEqual([]);
     expect(calls.sendEnter).toEqual([]);
+  });
+});
+
+describe('renderPanel reproduce line (RE-2)', () => {
+  const base = {
+    header: 'Worker launched.',
+    verb: 'launch' as const,
+    tmuxName: 'w',
+    sessionId: 's',
+    cwd: '/c',
+    eventsFile: '/e',
+    invocation: ['w', '/c'],
+  };
+
+  it('node-prefixes a JS bundle path so the line is runnable', () => {
+    const panel = renderPanel({ ...base, csdPath: '/x/dist/csd.cjs' });
+    expect(panel).toContain('reproduce: node /x/dist/csd.cjs launch w /c');
+  });
+
+  it('uses a non-JS CSD_PATH wrapper as-is', () => {
+    const panel = renderPanel({ ...base, csdPath: '/usr/local/bin/csd' });
+    expect(panel).toContain('reproduce: /usr/local/bin/csd launch w /c');
+    expect(panel).not.toContain('node /usr/local/bin/csd');
   });
 });

@@ -452,6 +452,9 @@ function renderItem(item: TurnItem, full: boolean): string {
     case 'prompt':
       return `---\n\n**Prompt:** ${item.text}\n`;
     case 'thinking':
+      // A turn with no thinking content yields an empty item; render nothing
+      // rather than a bare `> **Thinking:** ` line (RE-1).
+      if (item.text.trim() === '') return '';
       return `> **Thinking:** ${item.text.split('\n').join('\n> ')}\n`;
     case 'text':
       return `${item.text}\n`;

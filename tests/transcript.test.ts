@@ -196,6 +196,16 @@ describe('parseClaudeTurn / renderTurn', () => {
     expect(md).toBe(expected);
   });
 
+  it('renders nothing for an empty thinking block (RE-1)', () => {
+    const lines = [
+      '{"type":"user","message":{"content":"go"}}',
+      '{"type":"assistant","message":{"content":[{"type":"thinking","thinking":""},{"type":"text","text":"ok"}]}}',
+    ].join('\n');
+    const md = renderTurn(parseClaudeTurn(lines), { full: false });
+    expect(md).not.toContain('Thinking');
+    expect(md).toContain('ok');
+  });
+
   it('joins multi-line thinking with quote prefix', () => {
     const lines = [
       '{"type":"user","message":{"content":"go"}}',

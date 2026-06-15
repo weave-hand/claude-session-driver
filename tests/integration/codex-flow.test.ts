@@ -157,9 +157,13 @@ describe.skipIf(!HAS_TMUX)('codex flow e2e (real tmux + bundled csd)', () => {
     expect(existsSync(shim)).toBe(true);
     expect(statSync(shim).mode & 0o100).toBeTruthy();
 
-    // The derive panel notes the id/events are assigned on the first prompt.
-    expect(panel).toContain('session_id: (derive — assigned on first prompt)');
-    expect(panel).toContain('events:     (registered on first prompt)');
+    // The derive panel doesn't claim a specific id-assignment timing.
+    expect(panel).toContain(
+      'session_id: (derive — minted by the harness on registration)',
+    );
+    expect(panel).toContain(
+      'events:     (available after the worker registers)',
+    );
 
     // The tmux session is live and the sidecar harness marker exists.
     expect(hasSession(tmuxName)).toBe(true);

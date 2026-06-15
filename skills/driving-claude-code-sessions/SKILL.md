@@ -24,10 +24,11 @@ $SKILL/csd launch --harness codex my-task /path/to/project
 $SKILL/csd launch --harness pi    my-task /path/to/project
 ```
 
-The controller-facing command surface is **identical across all three harnesses** — `launch`, `send`, `converse`, `wait-for-turn`, `read-turn`, `read-events`, `status`, `stop`, and `handoff` behave the same regardless of harness. Two things differ:
+The controller-facing command surface is **identical across all three harnesses** — `launch`, `send`, `converse`, `wait-for-turn`, `read-turn`, `read-events`, `status`, `stop`, and `handoff` behave the same regardless of harness. A few things differ:
 
 - **Auth.** Each harness authenticates from its own home — Claude `~/.claude`, Codex `~/.codex`, Pi `~/.pi/agent`. `csd` stages that login into the worker at launch, so to rotate credentials, relaunch.
 - **`adopt` is Claude-only.** Claude takes a caller-assigned session id, so a session can be resumed by id (`claude --resume`). Codex and Pi mint their own ids on the first prompt and offer no resume-by-id — relaunch them instead.
+- **Codex isn't queryable until its first prompt.** Codex mints its session id only when you send the first prompt, so between `launch` and the first `send`/`converse` a codex worker's `status`, `session-id`, and `wait-for-turn` return `no worker known` — it *is* running, it just hasn't registered yet. `converse` handles this internally, so the typical launch→converse path is fine; only the lower-level commands see the gap. (Claude takes its id at launch and Pi registers at launch, so both are queryable immediately.)
 
 ## Prerequisites
 

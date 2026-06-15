@@ -64,13 +64,20 @@ export async function cmdReadEvents(
 
 export interface FollowEventsOpts {
   type?: string;
+  /**
+   * Cap the initial backlog to the last N matching lines before following, so a
+   * long-lived worker isn't fully re-ingested on every monitor start. `0` skips
+   * the backlog entirely (follow only NEW events). Omitted = replay everything.
+   */
+  last?: number;
   pollMs?: number;
 }
 
 /**
- * Tail a worker's event file: emit every raw line (including ones already
- * present at start), then poll for newly appended lines and emit those, until
- * `signal` aborts. With a `type` filter, only matching lines reach `sink`.
+ * Tail a worker's event file: emit the existing backlog (optionally capped to the
+ * last N matching lines via `last`), then poll for newly appended lines and emit
+ * those, until `signal` aborts. With a `type` filter, only matching lines reach
+ * `sink`.
  *
  * The CLI wires `sink` to `process.stdout.write` and runs this until SIGINT.
  * Unlike `cmdReadEvents`, this never validates the type (the CLI validates
@@ -87,16 +94,28 @@ export async function followEvents(
   const sid = resolveSession(ctx.workerDir, worker);
   if (sid === null) return;
   const eventFile = eventsPath(ctx.workerDir, sid);
+  const matches = (line: string): boolean =>
+    opts.type === undefined || parseEvent(line)?.event === opts.type;
 
+  // Backlog pass: emit existing lines (tail to the last N matching when `last`
+  // is set), then track the raw line count so only appends are emitted after.
   let emitted = 0;
+  if (existsSync(eventFile)) {
+    const lines = readRawLines(eventFile);
+    let backlog = lines.filter(matches);
+    if (opts.last !== undefined) {
+      backlog = opts.last <= 0 ? [] : backlog.slice(-opts.last);
+    }
+    for (const line of backlog) sink(line);
+    emitted = lines.length;
+  }
+
   for (;;) {
     if (signal?.aborted) return;
     if (existsSync(eventFile)) {
       const lines = readRawLines(eventFile);
       for (const line of lines.slice(emitted)) {
-        if (opts.type === undefined || parseEvent(line)?.event === opts.type) {
-          sink(line);
-        }
+        if (matches(line)) sink(line);
       }
       emitted = lines.length;
     }

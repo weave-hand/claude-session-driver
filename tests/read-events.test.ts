@@ -230,4 +230,56 @@ describe('followEvents', () => {
 
     expect(received).toEqual(['{"event":"stop","ts":"2025-01-01T00:00:01Z"}']);
   });
+
+  it('caps the replayed backlog to the last N with `last`, then follows new lines (RE-4)', async () => {
+    const ef = eventsPath(workerDir, 'sid-readev');
+    appendEvent(ef, { event: 'session_start', ts: 'T0' });
+    appendEvent(ef, { event: 'user_prompt_submit', ts: 'T1' });
+    appendEvent(ef, { event: 'stop', ts: 'T2' });
+
+    const received: string[] = [];
+    const ctrl = new AbortController();
+    const done = followEvents(
+      makeCtx(workerDir),
+      'sid-readev',
+      { pollMs: 10, last: 2 },
+      (line) => received.push(line),
+      ctrl.signal,
+    );
+    await new Promise((r) => setTimeout(r, 40));
+    appendEvent(ef, { event: 'session_end', ts: 'T3' });
+    await new Promise((r) => setTimeout(r, 40));
+    ctrl.abort();
+    await done;
+
+    // Backlog tailed to the last 2 (session_start skipped), then the new line.
+    expect(received).toEqual([
+      '{"event":"user_prompt_submit","ts":"T1"}',
+      '{"event":"stop","ts":"T2"}',
+      '{"event":"session_end","ts":"T3"}',
+    ]);
+  });
+
+  it('follows only NEW events with `last: 0` (no backlog replay) (RE-4)', async () => {
+    const ef = eventsPath(workerDir, 'sid-readev');
+    appendEvent(ef, { event: 'session_start', ts: 'T0' });
+    appendEvent(ef, { event: 'stop', ts: 'T1' });
+
+    const received: string[] = [];
+    const ctrl = new AbortController();
+    const done = followEvents(
+      makeCtx(workerDir),
+      'sid-readev',
+      { pollMs: 10, last: 0 },
+      (line) => received.push(line),
+      ctrl.signal,
+    );
+    await new Promise((r) => setTimeout(r, 40));
+    appendEvent(ef, { event: 'session_end', ts: 'T2' });
+    await new Promise((r) => setTimeout(r, 40));
+    ctrl.abort();
+    await done;
+
+    expect(received).toEqual(['{"event":"session_end","ts":"T2"}']);
+  });
 });

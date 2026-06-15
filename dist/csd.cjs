@@ -1735,15 +1735,23 @@ async function followEvents(ctx, worker, opts, sink, signal) {
   const sid = resolveSession(ctx.workerDir, worker);
   if (sid === null) return;
   const eventFile = eventsPath(ctx.workerDir, sid);
+  const matches = (line) => opts.type === void 0 || parseEvent(line)?.event === opts.type;
   let emitted = 0;
+  if ((0, import_node_fs13.existsSync)(eventFile)) {
+    const lines = readRawLines(eventFile);
+    let backlog = lines.filter(matches);
+    if (opts.last !== void 0) {
+      backlog = opts.last <= 0 ? [] : backlog.slice(-opts.last);
+    }
+    for (const line of backlog) sink(line);
+    emitted = lines.length;
+  }
   for (; ; ) {
     if (signal?.aborted) return;
     if ((0, import_node_fs13.existsSync)(eventFile)) {
       const lines = readRawLines(eventFile);
       for (const line of lines.slice(emitted)) {
-        if (opts.type === void 0 || parseEvent(line)?.event === opts.type) {
-          sink(line);
-        }
+        if (matches(line)) sink(line);
       }
       emitted = lines.length;
     }
@@ -1976,7 +1984,9 @@ Per-worker subcommands (require --worker, supplied by the shim):
                        turn-end after line N (a baseline you captured earlier)
   status               idle | working | terminated | gone | unknown
   read-events [--last N] [--type T] [--follow]
-                       Read the event JSONL stream
+                       Read the event JSONL stream. With --follow, --last N caps
+                       the replayed backlog to the last N events before tailing
+                       (--last 0 = only NEW events; omit = replay everything)
   read-turn [--full]   Last turn as markdown. Without --full, tool results
                        are truncated to 5 lines; --full shows them complete
   stop                 /exit, clean up meta + events + shim
@@ -2351,11 +2361,12 @@ function parseReadEventsArgs(argv) {
   return { last, type, follow };
 }
 function followStream(ctx, worker, opts, io, signal) {
+  const followOpts = { type: opts.type, last: opts.last, pollMs: opts.pollMs };
   if (signal !== void 0) {
     return followEvents(
       ctx,
       worker,
-      { type: opts.type, pollMs: opts.pollMs },
+      followOpts,
       (line) => io.out(`${line}
 `),
       signal
@@ -2367,7 +2378,7 @@ function followStream(ctx, worker, opts, io, signal) {
   return followEvents(
     ctx,
     worker,
-    { type: opts.type, pollMs: opts.pollMs },
+    followOpts,
     (line) => io.out(`${line}
 `),
     controller.signal

@@ -109,7 +109,9 @@ Per-worker subcommands (require --worker, supplied by the shim):
                        turn-end after line N (a baseline you captured earlier)
   status               idle | working | terminated | gone | unknown
   read-events [--last N] [--type T] [--follow]
-                       Read the event JSONL stream
+                       Read the event JSONL stream. With --follow, --last N caps
+                       the replayed backlog to the last N events before tailing
+                       (--last 0 = only NEW events; omit = replay everything)
   read-turn [--full]   Last turn as markdown. Without --full, tool results
                        are truncated to 5 lines; --full shows them complete
   stop                 /exit, clean up meta + events + shim
@@ -602,15 +604,16 @@ function parseReadEventsArgs(argv: string[]): ReadEventsArgs | DispatchError {
 export function followStream(
   ctx: CommandContext,
   worker: string,
-  opts: { type?: string; pollMs?: number },
+  opts: { type?: string; last?: number; pollMs?: number },
   io: Io,
   signal?: AbortSignal,
 ): Promise<number> {
+  const followOpts = { type: opts.type, last: opts.last, pollMs: opts.pollMs };
   if (signal !== undefined) {
     return followEvents(
       ctx,
       worker,
-      { type: opts.type, pollMs: opts.pollMs },
+      followOpts,
       (line) => io.out(`${line}\n`),
       signal,
     ).then(() => 0);
@@ -621,7 +624,7 @@ export function followStream(
   return followEvents(
     ctx,
     worker,
-    { type: opts.type, pollMs: opts.pollMs },
+    followOpts,
     (line) => io.out(`${line}\n`),
     controller.signal,
   )

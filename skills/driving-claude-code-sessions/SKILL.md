@@ -219,6 +219,8 @@ $SKILL/csd launch impl ~/proj
 /tmp/csd-workers/bin/impl stop
 ```
 
+Don't trust worker B's summary of what it did — check the produced file. A worker can report success while having written the wrong thing (see *Important Notes*).
+
 ## Edge Cases
 
 ### Worker crashes mid-turn
@@ -256,6 +258,7 @@ echo "Long instructions..." > /tmp/instructions.txt
 - **One controller per worker.** Two controllers driving the same tmux session will collide.
 - **Workers don't share state with the controller** except via files on disk and the event stream.
 - **Shim paths bake in absolute skill paths.** A plugin reinstall at a new location breaks live workers; relaunch them.
+- **csd is a transparent relay, not a validator.** `converse`/`read-turn` return whatever the worker says — verbatim, including when the worker is confidently wrong. For correctness-critical handoffs, verify the produced **artifact on disk**, not the worker's prose self-report.
 
 ## Environment variables
 

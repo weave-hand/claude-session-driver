@@ -36,35 +36,48 @@ function tailLines(text: string, n: number): string {
   return trimmed.split('\n').slice(-n).join('\n');
 }
 
-/** Best-effort `ps -eHo ...` tree, tail 100. Never throws. */
+/**
+ * Render a caught value as a short reason. A diagnostic probe must never fail
+ * silently: an empty section is indistinguishable from "captured, nothing to
+ * show", which is how a whole-OS breakage (a host-rejected `ps` flag) can hide.
+ */
+function errText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
+/**
+ * Best-effort `ps -eo ...` list, tail 100. `-eo` is portable; the GNU `-H`
+ * (forest) flag is rejected by BSD/macOS ps (csd's primary platform) and would
+ * blank this section. `pid,ppid` still let a reader reconstruct parentage.
+ */
 async function psTree(run: Runner): Promise<string> {
   try {
-    const r = await run('ps', ['-eHo', 'pid,ppid,stat,etime,comm']);
+    const r = await run('ps', ['-eo', 'pid,ppid,stat,etime,comm']);
     return tailLines(r.stdout, 100);
-  } catch {
-    return '';
+  } catch (e) {
+    return `(ps failed: ${errText(e)})`;
   }
 }
 
-/** Capture the pane (full scrollback, tail 200), or a not-present note. */
+/** Capture the pane (full scrollback, tail 200), or a not-present/failure note. */
 async function paneCapture(tmux: Tmux, tmuxName: string): Promise<string> {
   if (!(await tmux.hasSession(tmuxName))) {
     return `(tmux session '${tmuxName}' not present)`;
   }
   try {
     return tailLines(await tmux.capturePaneFull(tmuxName), 200);
-  } catch {
-    return '';
+  } catch (e) {
+    return `(pane capture failed: ${errText(e)})`;
   }
 }
 
-/** Tail a file's last `n` lines, or a not-present note. */
+/** Tail a file's last `n` lines, or a not-present/failure note. */
 function fileTail(file: string, n: number, missingNote: string): string {
   if (!existsSync(file)) return missingNote;
   try {
     return tailLines(readFileSync(file, 'utf8'), n);
-  } catch {
-    return '';
+  } catch (e) {
+    return `(read failed: ${errText(e)})`;
   }
 }
 
@@ -86,7 +99,7 @@ export async function dumpConverseDiag(
     `log_file=${opts.logFile}`,
     `event_file=${opts.eventFile}`,
     '',
-    '--- ps -eHo pid,ppid,stat,etime,comm (last 100 lines) ---',
+    '--- ps -eo pid,ppid,stat,etime,comm (last 100 lines) ---',
     await psTree(run),
     '',
     `--- tmux capture-pane -t ${opts.tmuxName} (full scrollback, tail 200) ---`,

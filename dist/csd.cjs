@@ -1165,12 +1165,15 @@ function tailLines(text, n) {
   if (trimmed.length === 0) return "";
   return trimmed.split("\n").slice(-n).join("\n");
 }
+function errText(e) {
+  return e instanceof Error ? e.message : String(e);
+}
 async function psTree(run3) {
   try {
-    const r = await run3("ps", ["-eHo", "pid,ppid,stat,etime,comm"]);
+    const r = await run3("ps", ["-eo", "pid,ppid,stat,etime,comm"]);
     return tailLines(r.stdout, 100);
-  } catch {
-    return "";
+  } catch (e) {
+    return `(ps failed: ${errText(e)})`;
   }
 }
 async function paneCapture(tmux2, tmuxName) {
@@ -1179,16 +1182,16 @@ async function paneCapture(tmux2, tmuxName) {
   }
   try {
     return tailLines(await tmux2.capturePaneFull(tmuxName), 200);
-  } catch {
-    return "";
+  } catch (e) {
+    return `(pane capture failed: ${errText(e)})`;
   }
 }
 function fileTail(file, n, missingNote) {
   if (!(0, import_node_fs9.existsSync)(file)) return missingNote;
   try {
     return tailLines((0, import_node_fs9.readFileSync)(file, "utf8"), n);
-  } catch {
-    return "";
+  } catch (e) {
+    return `(read failed: ${errText(e)})`;
   }
 }
 async function dumpConverseDiag(opts) {
@@ -1205,7 +1208,7 @@ async function dumpConverseDiag(opts) {
     `log_file=${opts.logFile}`,
     `event_file=${opts.eventFile}`,
     "",
-    "--- ps -eHo pid,ppid,stat,etime,comm (last 100 lines) ---",
+    "--- ps -eo pid,ppid,stat,etime,comm (last 100 lines) ---",
     await psTree(run3),
     "",
     `--- tmux capture-pane -t ${opts.tmuxName} (full scrollback, tail 200) ---`,

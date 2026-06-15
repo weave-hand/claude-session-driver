@@ -70,7 +70,7 @@ describe('dumpConverseDiag', () => {
     expect(out).toContain(`event_file=${eventFile}`);
     // section headers
     expect(out).toContain(
-      '--- ps -eHo pid,ppid,stat,etime,comm (last 100 lines) ---',
+      '--- ps -eo pid,ppid,stat,etime,comm (last 100 lines) ---',
     );
     expect(out).toContain('PS-TREE-OUTPUT');
     expect(out).toContain(
@@ -147,7 +147,7 @@ describe('dumpConverseDiag', () => {
     expect(ok).toBe(false);
   });
 
-  it('still succeeds (best-effort) when the ps runner fails', async () => {
+  it('writes the failure reason into the ps section instead of swallowing it', async () => {
     const dest = join(dir, 'diag.txt');
     const tmux = makeTmux(async () => ({ stdout: '', stderr: '', code: 0 }));
     const failingRun = vi.fn().mockRejectedValue(new Error('no ps here'));
@@ -168,6 +168,40 @@ describe('dumpConverseDiag', () => {
 
     expect(ok).toBe(true);
     const out = readFileSync(dest, 'utf8');
+    // Best-effort still completes, but a broken probe must announce itself — a
+    // silent empty section reads as "all quiet" when it means "probe broke".
+    expect(out).toContain('(ps failed: no ps here)');
     expect(out).toContain('=== end csd diagnostic ===');
+  });
+
+  it('captures a real host ps tree (real runner) — catches host-rejected ps flags', async () => {
+    // Omit `run` so psTree shells out to the REAL host ps. A GNU-only flag the
+    // BSD/macOS ps rejects would make this section empty or a "(ps failed: ...)"
+    // note — which a stubbed runner can never reveal. hasSession -> false keeps
+    // the pane probe from needing a live tmux server.
+    const dest = join(dir, 'diag-real.txt');
+    const tmux = makeTmux(async () => ({ stdout: '', stderr: '', code: 1 }));
+
+    const ok = await dumpConverseDiag({
+      sid: 'sid-real',
+      worker: 'w',
+      tmuxName: 'absent',
+      logFile: join(dir, 'nope-log'),
+      eventFile: join(dir, 'nope-ev'),
+      timeout: 5,
+      dest,
+      reason: 'converse_timeout',
+      tmux,
+      now: () => NOW,
+    });
+
+    expect(ok).toBe(true);
+    const out = readFileSync(dest, 'utf8');
+    const header = '--- ps -eo pid,ppid,stat,etime,comm (last 100 lines) ---';
+    const psSection = out.split(header)[1]?.split('\n\n')[0]?.trim() ?? '';
+    expect(psSection.length).toBeGreaterThan(0);
+    expect(psSection.startsWith('(ps failed')).toBe(false);
+    // Real ps output is multiple rows (header + processes).
+    expect(psSection.split('\n').length).toBeGreaterThan(1);
   });
 });

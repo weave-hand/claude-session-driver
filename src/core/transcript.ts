@@ -250,6 +250,28 @@ function canonicalCodexTool(name: string): string {
   return CODEX_TOOL_NAMES[name] ?? name;
 }
 
+/**
+ * Codex wraps each exec result in a metadata header — `Chunk ID`, `Wall time`,
+ * `Process exited with code N`, `Original token count` — then a literal `Output:`
+ * line and the real output. The default read-turn truncation would otherwise
+ * show only that header, so collapse it to a single `exited <code> · <wall>s`
+ * status line and keep the output. Anchored on the `Output:` boundary AND a
+ * recognizable `Process exited with code` header; if either is absent (not an
+ * exec result, or codex changed the format) the text passes through unchanged —
+ * never drop data. Wall time is optional: omitted from the status if not found.
+ */
+function collapseCodexResult(text: string): string {
+  const marker = '\nOutput:\n';
+  const idx = text.indexOf(marker);
+  if (idx === -1) return text;
+  const header = text.slice(0, idx);
+  const exit = header.match(/Process exited with code (\S+)/);
+  if (!exit) return text;
+  const wall = header.match(/Wall time:\s*(\S+)\s*seconds/);
+  const status = wall ? `exited ${exit[1]} · ${wall[1]}s` : `exited ${exit[1]}`;
+  return `${status}\n${text.slice(idx + marker.length)}`;
+}
+
 export function parseCodexTurn(jsonl: string): NormalizedTurn {
   const lines = parseRolloutLines(jsonl);
   if (lines.length === 0) return [];
@@ -271,7 +293,7 @@ export function parseCodexTurn(jsonl: string): NormalizedTurn {
     } else if (p.type === 'function_call_output') {
       turn.push({
         kind: 'tool_result',
-        content: resultContent(p.output),
+        content: collapseCodexResult(resultContent(p.output)),
         isError: false,
       });
     }

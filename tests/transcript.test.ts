@@ -28,6 +28,49 @@ describe('parseCodexTurn / renderTurn', () => {
     const md = renderTurn(parseCodexTurn(lines), { full: false });
     expect(md).toContain('**Tool: apply_patch**');
   });
+
+  const fcOutput = (output: string): string =>
+    JSON.stringify({
+      type: 'response_item',
+      payload: { type: 'function_call_output', call_id: 'c1', output },
+    });
+
+  it('collapses the codex exec-result header to a one-line status, surfacing real output past truncation', () => {
+    // Verbatim shape captured from a real codex 0.133 worker (seq 1 8).
+    const output =
+      'Chunk ID: c2e076\nWall time: 0.0000 seconds\nProcess exited with code 0\nOriginal token count: 4\nOutput:\n1\n2\n3\n4\n5\n6\n7\n8\n';
+    const md = renderTurn(
+      parseCodexTurn([userLine, fcOutput(output)].join('\n')),
+      { full: false },
+    );
+    expect(md).toContain('exited 0 · 0.0000s\n1\n2\n3\n4');
+    expect(md).not.toContain('Chunk ID');
+    expect(md).not.toContain('Wall time');
+    expect(md).not.toContain('Original token count');
+    expect(md).toMatch(/\.\.\. \(\d+ lines total\)/);
+  });
+
+  it('omits wall time from the status when codex does not report it', () => {
+    const md = renderTurn(
+      parseCodexTurn(
+        [userLine, fcOutput('Process exited with code 2\nOutput:\nboom')].join(
+          '\n',
+        ),
+      ),
+      { full: false },
+    );
+    expect(md).toContain('exited 2\nboom');
+    expect(md).not.toContain('·');
+  });
+
+  it('passes a non-codex result through unchanged (no exec header)', () => {
+    const md = renderTurn(
+      parseCodexTurn([userLine, fcOutput('plain output\nsecond')].join('\n')),
+      { full: false },
+    );
+    expect(md).toContain('plain output');
+    expect(md).not.toContain('exited');
+  });
 });
 
 describe('parseClaudeTurn / renderTurn', () => {

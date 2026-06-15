@@ -284,6 +284,18 @@ var CODEX_TOOL_NAMES = {
 function canonicalCodexTool(name) {
   return CODEX_TOOL_NAMES[name] ?? name;
 }
+function collapseCodexResult(text) {
+  const marker = "\nOutput:\n";
+  const idx = text.indexOf(marker);
+  if (idx === -1) return text;
+  const header = text.slice(0, idx);
+  const exit = header.match(/Process exited with code (\S+)/);
+  if (!exit) return text;
+  const wall = header.match(/Wall time:\s*(\S+)\s*seconds/);
+  const status = wall ? `exited ${exit[1]} \xB7 ${wall[1]}s` : `exited ${exit[1]}`;
+  return `${status}
+${text.slice(idx + marker.length)}`;
+}
 function parseCodexTurn(jsonl) {
   const lines = parseRolloutLines(jsonl);
   if (lines.length === 0) return [];
@@ -304,7 +316,7 @@ function parseCodexTurn(jsonl) {
     } else if (p.type === "function_call_output") {
       turn.push({
         kind: "tool_result",
-        content: resultContent(p.output),
+        content: collapseCodexResult(resultContent(p.output)),
         isError: false
       });
     }

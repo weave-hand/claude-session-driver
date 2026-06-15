@@ -1623,6 +1623,24 @@ async function cmdList(ctx, opts) {
   return { stdout: [HEADER, ...rows].join("\n"), code: 0 };
 }
 
+// src/commands/prune.ts
+async function cmdPrune(ctx) {
+  const metas = listWorkers(ctx.workerDir);
+  const pruned = [];
+  for (const meta of metas) {
+    if (await computeStatus(ctx, meta) !== "gone") continue;
+    removeWorker(ctx.workerDir, meta.session_id, meta.tmux_name);
+    pruned.push(meta.tmux_name);
+  }
+  if (pruned.length === 0) {
+    return { stderr: "No gone workers to prune", code: 0 };
+  }
+  return {
+    stdout: `Pruned ${pruned.length} gone worker(s): ${pruned.join(", ")}`,
+    code: 0
+  };
+}
+
 // src/commands/read-events.ts
 var import_node_fs13 = require("fs");
 function filterByType(lines, type) {
@@ -1836,7 +1854,14 @@ var realIo = {
   out: (s) => process.stdout.write(s),
   err: (s) => process.stderr.write(s)
 };
-var TOP_LEVEL_SUBS = ["launch", "adopt", "list", "grant-consent", "help"];
+var TOP_LEVEL_SUBS = [
+  "launch",
+  "adopt",
+  "list",
+  "prune",
+  "grant-consent",
+  "help"
+];
 var PER_WORKER_SUBS = [
   "converse",
   "send",
@@ -1875,6 +1900,8 @@ Top-level subcommands:
   list [--all] [<pattern>]
                        Enumerate workers (default: skip workers whose tmux is
                        gone). Optional pattern filters by tmux-name substring
+  prune                Remove the runtime state of all \`gone\` workers (tmux
+                       session dead); live workers are untouched
   grant-consent        One-time consent for running workers with permissions
                        bypassed (--dangerously-skip-permissions et al.)
   help                 Show this message
@@ -2108,6 +2135,8 @@ async function run2(argv, io = realIo) {
       }
       return emit(io, await cmdList(ctx, opts));
     }
+    case "prune":
+      return emit(io, await cmdPrune(ctx));
     case "converse": {
       let withTurn = false;
       let i = 0;

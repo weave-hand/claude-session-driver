@@ -10,6 +10,7 @@ import { cmdHandoff } from './commands/handoff.js';
 import type { BootstrapOpts } from './commands/launch.js';
 import { cmdLaunch } from './commands/launch.js';
 import { cmdList } from './commands/list.js';
+import { cmdPrune } from './commands/prune.js';
 import { cmdReadEvents, followEvents } from './commands/read-events.js';
 import { cmdReadTurn } from './commands/read-turn.js';
 import { cmdSend } from './commands/send.js';
@@ -37,7 +38,14 @@ const realIo: Io = {
   err: (s) => process.stderr.write(s),
 };
 
-const TOP_LEVEL_SUBS = ['launch', 'adopt', 'list', 'grant-consent', 'help'];
+const TOP_LEVEL_SUBS = [
+  'launch',
+  'adopt',
+  'list',
+  'prune',
+  'grant-consent',
+  'help',
+];
 const PER_WORKER_SUBS = [
   'converse',
   'send',
@@ -83,6 +91,8 @@ Top-level subcommands:
   list [--all] [<pattern>]
                        Enumerate workers (default: skip workers whose tmux is
                        gone). Optional pattern filters by tmux-name substring
+  prune                Remove the runtime state of all \`gone\` workers (tmux
+                       session dead); live workers are untouched
   grant-consent        One-time consent for running workers with permissions
                        bypassed (--dangerously-skip-permissions et al.)
   help                 Show this message
@@ -395,6 +405,9 @@ export async function run(argv: string[], io: Io = realIo): Promise<number> {
       }
       return emit(io, await cmdList(ctx, opts));
     }
+
+    case 'prune':
+      return emit(io, await cmdPrune(ctx));
 
     case 'converse': {
       let withTurn = false;

@@ -7,7 +7,11 @@ import { cmdList } from '../src/commands/list.js';
 import { appendEvent } from '../src/core/event-log.js';
 import { eventsPath, shimPath } from '../src/core/paths.js';
 import { makeTmux } from '../src/core/tmux.js';
-import { writeMeta } from '../src/core/worker-store.js';
+import {
+  writeHarnessMarker,
+  writeMeta,
+  writeShim,
+} from '../src/core/worker-store.js';
 import { getDriver } from '../src/harness/registry.js';
 
 function tmpDir(): string {
@@ -149,5 +153,43 @@ describe('cmdList', () => {
     expect(result.code).toBe(0);
     expect(result.stdout).toContain('frontend-1');
     expect(result.stdout).not.toContain('backend-1');
+  });
+
+  it('shows an unregistered row for a launched-but-unregistered derive worker (RE-2)', async () => {
+    // A codex worker between launch and first prompt: sidecar + live tmux, no meta.
+    writeHarnessMarker(workerDir, 'cx-pending', 'codex');
+    writeShim(workerDir, 'cx-pending', '/dist/csd.cjs');
+    const result = await cmdList(
+      makeCtx(workerDir, new Set(['cx-pending'])),
+      {},
+    );
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(
+      `unregistered\tcodex\tcx-pending\t-\t${shimPath(workerDir, 'cx-pending')}\t-`,
+    );
+  });
+
+  it('does not show a dead orphan (no meta, tmux gone) in the list', async () => {
+    writeHarnessMarker(workerDir, 'dead', 'codex');
+    writeShim(workerDir, 'dead', '/dist/csd.cjs');
+    // tmux NOT alive -> not a live unregistered worker, just leftover cruft.
+    const result = await cmdList(makeCtx(workerDir, new Set()), {});
+    expect(result.stderr).toBe('No workers found');
+    expect(result.stdout).toBeUndefined();
+  });
+
+  it('reports "No workers found" when a pattern matches nothing (RE-6)', async () => {
+    writeMeta(workerDir, {
+      tmux_name: 'alpha',
+      session_id: 'sid-a',
+      cwd: '/work/a',
+      harness: 'claude',
+    });
+    const result = await cmdList(makeCtx(workerDir, new Set(['alpha'])), {
+      pattern: 'zzz',
+    });
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe('No workers found');
+    expect(result.stdout).toBeUndefined();
   });
 });

@@ -1653,12 +1653,8 @@ var HEADER = ["STATUS", "HARNESS", "TMUX", "SESSION_ID", "SHIM", "CWD"].join(
   "	"
 );
 async function cmdList(ctx, opts) {
-  const metas = listWorkers(ctx.workerDir);
-  if (metas.length === 0) {
-    return { stderr: "No workers found", code: 0 };
-  }
   const rows = [];
-  for (const meta of metas) {
+  for (const meta of listWorkers(ctx.workerDir)) {
     if (opts.pattern && !meta.tmux_name.includes(opts.pattern)) continue;
     const status = await computeStatus(ctx, meta);
     if (status === "gone" && !opts.all) continue;
@@ -1672,6 +1668,23 @@ async function cmdList(ctx, opts) {
         meta.cwd
       ].join("	")
     );
+  }
+  for (const name of listOrphanNames(ctx.workerDir)) {
+    if (opts.pattern && !name.includes(opts.pattern)) continue;
+    if (!await ctx.tmux.hasSession(name)) continue;
+    rows.push(
+      [
+        "unregistered",
+        readHarnessMarker(ctx.workerDir, name) ?? "?",
+        name,
+        "-",
+        shimPath(ctx.workerDir, name),
+        "-"
+      ].join("	")
+    );
+  }
+  if (rows.length === 0) {
+    return { stderr: "No workers found", code: 0 };
   }
   return { stdout: [HEADER, ...rows].join("\n"), code: 0 };
 }

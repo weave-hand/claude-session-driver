@@ -42,25 +42,39 @@ describe('cmdWaitForTurn', () => {
     rmSync(workerDir, { recursive: true });
   });
 
-  it('returns the matching stop event raw line', async () => {
+  it('waits for the NEXT turn-end, ignoring a stale stop already in the file (BUG-1)', async () => {
     const ef = eventsPath(workerDir, SID);
     appendEvent(ef, { event: 'session_start', ts: '2025-01-01T00:00:00Z' });
+    // A stop from a PREVIOUS turn is already on disk. A bare wait-for-turn must
+    // not return it; it must block for the turn-end of the CURRENT turn.
     appendEvent(ef, { event: 'stop', ts: '2025-01-01T00:00:01Z' });
-    const result = await cmdWaitForTurn(makeCtx(workerDir), SID, {
+    const p = cmdWaitForTurn(makeCtx(workerDir), SID, {
       timeout: 5,
       pollMs: 10,
     });
+    setTimeout(() => {
+      appendEvent(ef, {
+        event: 'user_prompt_submit',
+        ts: '2025-01-01T00:00:02Z',
+      });
+      appendEvent(ef, { event: 'stop', ts: '2025-01-01T00:00:03Z' });
+    }, 30);
+    const result = await p;
     expect(result.code).toBe(0);
-    expect(result.stdout).toBe('{"event":"stop","ts":"2025-01-01T00:00:01Z"}');
+    expect(result.stdout).toBe('{"event":"stop","ts":"2025-01-01T00:00:03Z"}');
   });
 
   it('returns session_end as a matching turn end', async () => {
     const ef = eventsPath(workerDir, SID);
-    appendEvent(ef, { event: 'session_end', ts: '2025-01-01T00:00:09Z' });
-    const result = await cmdWaitForTurn(makeCtx(workerDir), SID, {
+    appendEvent(ef, { event: 'session_start', ts: '2025-01-01T00:00:00Z' });
+    const p = cmdWaitForTurn(makeCtx(workerDir), SID, {
       timeout: 5,
       pollMs: 10,
     });
+    setTimeout(() => {
+      appendEvent(ef, { event: 'session_end', ts: '2025-01-01T00:00:09Z' });
+    }, 30);
+    const result = await p;
     expect(result.code).toBe(0);
     expect(result.stdout).toBe(
       '{"event":"session_end","ts":"2025-01-01T00:00:09Z"}',

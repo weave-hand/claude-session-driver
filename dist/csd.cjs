@@ -1381,7 +1381,6 @@ var isTurnEnd = (line) => {
 };
 async function cmdWaitForTurn(ctx, worker, opts) {
   const timeout = opts.timeout ?? 60;
-  const afterLine = opts.afterLine ?? 0;
   const pollMs = opts.pollMs ?? 500;
   const sid = resolveSession(ctx.workerDir, worker);
   if (sid === null) {
@@ -1398,7 +1397,7 @@ async function cmdWaitForTurn(ctx, worker, opts) {
     }
     await sleep5(pollMs);
   }
-  let linesChecked = afterLine;
+  let linesChecked = opts.afterLine ?? readRawLines(eventFile).length;
   while (Date.now() < deadline) {
     const lines = readRawLines(eventFile);
     if (lines.length > linesChecked) {
@@ -1917,8 +1916,11 @@ Per-worker subcommands (require --worker, supplied by the shim):
                        Send prompt, wait for turn, return assistant text.
                        --with-turn returns the full markdown turn instead
   send <prompt>        Send a prompt without waiting for the turn
-  wait-for-turn [timeout=60]
-                       Block until the next stop OR session_end
+  wait-for-turn [timeout=60] [--after-line N]
+                       Block until the next stop OR session_end. By default the
+                       baseline is the events file's current end, so it waits for
+                       a NEW turn-end; pass --after-line N to wait for the first
+                       turn-end after line N (a baseline you captured earlier)
   status               idle | working | terminated | gone | unknown
   read-events [--last N] [--type T] [--follow]
                        Read the event JSONL stream

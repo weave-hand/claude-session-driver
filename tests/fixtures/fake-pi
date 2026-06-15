@@ -1,0 +1,196 @@
+#!/usr/bin/env node
+/**
+ * fake-pi — a test double for the `pi` binary, pointed at by CSD_PI_BIN so
+ * `csd launch --harness pi` drives it instead of the real coding agent. It
+ * impersonates the parts of pi's DERIVE control-plane flow that csd's launch ->
+ * status -> read-turn -> send -> stop path depends on, over REAL tmux.
+ *
+ * Unlike claude/codex, pi's control plane is a native TypeScript EXTENSION (the
+ * bundled `dist/pi-extension.mjs`, loaded via `pi -e <path>`). When the real pi
+ * loads that extension, its `pi.on(...)` handlers SELF-REGISTER `<sid>.meta` and
+ * APPEND WorkerEvents to `<CSD_WORKER_DIR>/<sid>.events.jsonl`. A fake binary
+ * cannot host our extension and fire genuine `pi.on` events with a real
+ * ExtensionContext, so this fake SIMULATES what pi + the extension TOGETHER
+ * produce — exactly as fake-claude/fake-codex simulate their harness + control
+ * plane. It writes the meta + events DIRECTLY (standing in for the extension's
+ * output) and lays down a valid pi session transcript.
+ *
+ * What it does:
+ *   1. Reads its launch context:
+ *        --session-dir <dir>  (pi driver passes `--session-dir <home>/sessions`)
+ *        CSD_WORKER_DIR       (the events/meta sink; pi driver pins it in the env)
+ *        CSD_TMUX_NAME        (the tmux name baked into the self-registered meta)
+ *      cwd is resolved from process.cwd() (tmux launches us with `-c <cwd>`, the
+ *      realpath the launch command resolved), matching how the extension reads
+ *      ctx.cwd.
+ *   2. Mints its OWN session id (derive — pi has no --session-id flag).
+ *   3. Writes a minimal pi session transcript at
+ *        <session-dir>/<ts>_<sid>.jsonl
+ *      with a v3 header line + a boot turn (user message + assistant text
+ *      "FAKE_PI_DONE"), so read-turn (via parsePiTurn) renders a completed turn.
+ *   4. SELF-REGISTERS <CSD_WORKER_DIR>/<sid>.meta — exactly what the extension
+ *      writes on its first event: { tmux_name, session_id, cwd, harness:'pi',
+ *      transcript_path }.
+ *   5. APPENDS the boot-turn WorkerEvents to <CSD_WORKER_DIR>/<sid>.events.jsonl
+ *      (session_start, user_prompt_submit, stop) — what the extension's pi.on
+ *      handlers would append — so status/wait-for-turn/read-events work. The
+ *      boot turn ends with `stop`, so status reports idle.
+ *   6. Prints a pi-ish status-bar line so csd's awaitPiReady poll succeeds fast.
+ *   7. Stays alive reading its stdin (the tmux pane). On each pasted prompt it
+ *      appends a `user_prompt_submit` event (csd's send-confirm signal, issue
+ *      #20) but produces NO new completed turn. On `/quit` (pi's quit keys) it
+ *      appends `session_end` and exits.
+ *
+ * The meta JSON matches what writeMeta writes; the event JSONL matches the
+ * WorkerEvent shape (event + ts; session_start includes cwd) the extension's
+ * appendEvent emits. These are simple, hand-written here.
+ *
+ * This is an ES module (the repo's package.json sets "type":"module"); node
+ * loads an extensionless file run directly per that setting.
+ */
+
+import {
+  existsSync,
+  mkdirSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs';
+import { join } from 'node:path';
+import { createInterface } from 'node:readline';
+
+function parseSessionDir(argv) {
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--session-dir' && i + 1 < argv.length) return argv[i + 1];
+  }
+  return null;
+}
+
+function requireEnv(name) {
+  const v = process.env[name];
+  if (!v) {
+    process.stderr.write(`fake-pi: missing required env ${name}\n`);
+    process.exit(2);
+  }
+  return v;
+}
+
+const sessionDir = parseSessionDir(process.argv.slice(2));
+if (!sessionDir) {
+  process.stderr.write('fake-pi: no --session-dir in argv\n');
+  process.exit(2);
+}
+
+const workerDir = requireEnv('CSD_WORKER_DIR');
+const tmuxName = requireEnv('CSD_TMUX_NAME');
+
+// tmux launches us with `-c <cwd>`; resolve it the way the launch command did
+// (realpath), matching the cwd the extension reads from ctx.cwd.
+const cwd = realpathSync(process.cwd());
+
+// Mint our own session id (derive — pi has no assign flag).
+const sid = `019e0fa2-1234-7000-8000-${String(process.pid).padStart(12, '0')}`;
+const stamp = new Date().toISOString().replace(/:/g, '-');
+const transcriptPath = join(sessionDir, `${stamp}_${sid}.jsonl`);
+
+const metaPath = join(workerDir, `${sid}.meta`);
+const eventsPath = join(workerDir, `${sid}.events.jsonl`);
+
+function nowIso() {
+  // The csd events use second-resolution UTC (isoSecondsUtc): YYYY-MM-DDTHH:MM:SSZ.
+  return `${new Date().toISOString().slice(0, 19)}Z`;
+}
+
+function jsonl(...objs) {
+  return `${objs.map((o) => JSON.stringify(o)).join('\n')}\n`;
+}
+
+/** Append one WorkerEvent JSONL line (the shape appendEvent emits). */
+function appendEvent(event, extra = {}) {
+  writeFileSync(eventsPath, jsonl({ event, ts: nowIso(), ...extra }), {
+    flag: 'a',
+  });
+}
+
+/**
+ * Write a pi session transcript: a v3 header line (skipped by parsePiTurn — not
+ * a `message` entry) + one completed turn (user message + assistant text). The
+ * assistant text is FAKE_PI_DONE so read-turn renders it.
+ */
+function writeTranscript(prompt, response) {
+  mkdirSync(sessionDir, { recursive: true });
+  writeFileSync(
+    transcriptPath,
+    jsonl(
+      { type: 'session', version: 3, id: sid, cwd },
+      { type: 'message', message: { role: 'user', content: prompt } },
+      {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: response }],
+        },
+      },
+    ),
+  );
+}
+
+/**
+ * Self-register <sid>.meta if it does not already exist — exactly what the
+ * extension's `record()` writes on the first event for a sid.
+ */
+function selfRegisterMeta() {
+  if (existsSync(metaPath)) return;
+  mkdirSync(workerDir, { recursive: true });
+  writeFileSync(
+    metaPath,
+    JSON.stringify({
+      tmux_name: tmuxName,
+      session_id: sid,
+      cwd,
+      harness: 'pi',
+      transcript_path: transcriptPath,
+    }),
+  );
+}
+
+// csd `send` wraps the prompt in bracketed-paste markers (ESC [200~ ... ESC
+// [201~). Reading raw pty bytes over readline, strip them (with the leading ESC).
+const ESC = String.fromCharCode(27);
+const BRACKET_START = `${ESC}[200~`;
+const BRACKET_END = `${ESC}[201~`;
+
+// --- Boot turn: lay down the transcript, self-register the meta, emit events. ---
+writeTranscript('boot', 'FAKE_PI_DONE');
+selfRegisterMeta();
+appendEvent('session_start', { cwd });
+appendEvent('user_prompt_submit');
+appendEvent('stop');
+
+// --- Status-bar line -> csd's awaitPiReady poll returns fast. ---
+process.stdout.write('0.0%/272k (auto)\n');
+
+// --- React to pasted prompts the way pi (through the extension) would. ---
+const rl = createInterface({ input: process.stdin });
+rl.on('line', (raw) => {
+  const line = raw
+    .split(BRACKET_START)
+    .join('')
+    .split(BRACKET_END)
+    .join('')
+    .trim();
+  if (line.length === 0) return;
+  if (line === '/quit') {
+    appendEvent('session_end');
+    rl.close();
+    process.exit(0);
+  }
+  // A pasted user prompt: confirm submission (issue #20) but produce NO new
+  // completed turn — converse must wait for a real new turn, not the boot one.
+  appendEvent('user_prompt_submit');
+});
+
+// stdin closing (pane gone) ends the worker.
+rl.on('close', () => process.exit(0));
+
+// Keep the event loop alive even if stdin yields no data.
+setInterval(() => {}, 1 << 30);

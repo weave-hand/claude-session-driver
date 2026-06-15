@@ -1,0 +1,157 @@
+#!/usr/bin/env node
+/**
+ * fake-claude — a test double for the `claude` binary, pointed at by
+ * CSD_CLAUDE_BIN so `csd launch` drives it instead of the real CLI.
+ *
+ * It impersonates the parts of Claude Code that csd's launch -> send ->
+ * read-turn -> stop flow depends on, exercising the REAL bundled hook
+ * (dist/emit-event.cjs) and REAL tmux end to end:
+ *
+ *   1. Parses `--session-id <sid>` from its argv (csd assigns the id).
+ *   2. Emits a `session_start` event by invoking the real bundled hook the way
+ *      Claude Code would: it pipes a SessionStart hook payload on stdin to
+ *      `node <dist>/emit-event.cjs` with CSD_WORKER_DIR set. The hook's
+ *      meta-gate is satisfied because `csd launch` writes the meta BEFORE
+ *      starting this worker. This is launch's proof-of-life signal.
+ *   3. Writes a minimal Claude transcript (one completed turn: a user prompt +
+ *      an assistant text response) at the path csd's read-turn reads, so
+ *      read-turn renders real markdown.
+ *   4. Stays alive reading its stdin (the tmux pane's pty, exactly like the
+ *      real CLI). When `csd send` pastes a prompt + Enter, this worker receives
+ *      it on stdin, emits `user_prompt_submit` (send's submission-confirm
+ *      signal, issue #20), appends the prompt to the transcript, then emits
+ *      `stop` (wait-for-turn's turn-complete signal). This makes a real
+ *      send -> wait-for-turn -> read-turn round trip work without the API.
+ *   5. On `/exit` (csd stop's quit keys) it emits `session_end` and exits, so
+ *      stop sees a graceful shutdown rather than only the kill-session fallback.
+ *
+ * Config the fake cannot learn from argv/cwd is read from the environment:
+ *   CSD_FAKE_WORKER_DIR  worker dir where <sid>.meta / <sid>.events.jsonl live
+ *   CSD_FAKE_HOME        HOME used to locate ~/.claude/projects/<enc>/<sid>.jsonl
+ *   CSD_FAKE_DIST        directory containing the bundled emit-event.cjs hook
+ *
+ * A new tmux session does NOT inherit the launching process's env (only the
+ * scrubbed `-e` pins), so these are passed via a tiny per-test wrapper that
+ * sets them and execs this script. See tests/integration/claude-flow.test.ts.
+ *
+ * This is an ES module (the repo's package.json sets "type":"module"); node
+ * loads an extensionless file run directly per that setting.
+ */
+
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { createInterface } from 'node:readline';
+
+function parseSessionId(argv) {
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--session-id' && i + 1 < argv.length) return argv[i + 1];
+  }
+  return null;
+}
+
+function requireEnv(name) {
+  const v = process.env[name];
+  if (!v) {
+    process.stderr.write(`fake-claude: missing required env ${name}\n`);
+    process.exit(2);
+  }
+  return v;
+}
+
+const sid = parseSessionId(process.argv.slice(2));
+if (!sid) {
+  process.stderr.write('fake-claude: no --session-id in argv\n');
+  process.exit(2);
+}
+
+const workerDir = requireEnv('CSD_FAKE_WORKER_DIR');
+const home = requireEnv('CSD_FAKE_HOME');
+const dist = requireEnv('CSD_FAKE_DIST');
+
+// tmux launches us with `-c <cwd>`; resolve it the way launch did (realpath).
+const cwd = realpathSync(process.cwd());
+const transcriptPath = join(
+  home,
+  '.claude',
+  'projects',
+  cwd.replace(/[/._]/g, '-'),
+  `${sid}.jsonl`,
+);
+
+/**
+ * Drive the REAL bundled hook exactly as Claude Code does: pipe a hook payload
+ * JSON on stdin to `node <dist>/emit-event.cjs` with CSD_WORKER_DIR pointing at
+ * the worker dir. The hook appends a normalized event to <sid>.events.jsonl.
+ */
+function emit(hookEventName, extra = {}) {
+  const payload = JSON.stringify({
+    session_id: sid,
+    hook_event_name: hookEventName,
+    cwd,
+    ...extra,
+  });
+  spawnSync('node', [join(dist, 'emit-event.cjs')], {
+    input: payload,
+    env: { ...process.env, CSD_WORKER_DIR: workerDir },
+    encoding: 'utf8',
+  });
+}
+
+// csd `send` wraps the prompt in bracketed-paste markers (ESC [200~ ... ESC
+// [201~). A real terminal consumes these at the TTY layer; reading the raw pty
+// bytes over readline, we must strip them (with their leading ESC) ourselves.
+const ESC = String.fromCharCode(27);
+const BRACKET_START = `${ESC}[200~`;
+const BRACKET_END = `${ESC}[201~`;
+
+function jsonl(...lines) {
+  return `${lines.map((o) => JSON.stringify(o)).join('\n')}\n`;
+}
+
+/** Write a transcript with one completed turn for the given prompt. */
+function writeTranscript(prompt, response) {
+  mkdirSync(dirname(transcriptPath), { recursive: true });
+  writeFileSync(
+    transcriptPath,
+    jsonl(
+      { type: 'user', message: { content: prompt } },
+      {
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: response }] },
+      },
+    ),
+  );
+}
+
+// --- Bootstrap: announce session_start and lay down the initial transcript. ---
+emit('SessionStart');
+writeTranscript('hello fake worker', 'fake worker ready');
+
+// --- Stay alive, reacting to pasted prompts and /exit the way claude would. ---
+const rl = createInterface({ input: process.stdin });
+rl.on('line', (raw) => {
+  const line = raw
+    .split(BRACKET_START)
+    .join('')
+    .split(BRACKET_END)
+    .join('')
+    .trim();
+  if (line.length === 0) return;
+  if (line === '/exit') {
+    emit('SessionEnd');
+    rl.close();
+    process.exit(0);
+  }
+  // A pasted user prompt: confirm submission (issue #20), record the turn, then
+  // signal turn completion via Stop.
+  emit('UserPromptSubmit');
+  writeTranscript(line, `echo: ${line}`);
+  emit('Stop');
+});
+
+// stdin closing (pane gone) ends the worker.
+rl.on('close', () => process.exit(0));
+
+// Keep the event loop alive even if stdin yields no data.
+setInterval(() => {}, 1 << 30);

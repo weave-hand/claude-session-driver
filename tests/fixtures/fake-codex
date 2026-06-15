@@ -1,0 +1,199 @@
+#!/usr/bin/env node
+/**
+ * fake-codex — a test double for the `codex` binary, pointed at by
+ * CSD_CODEX_BIN so `csd launch --harness codex` drives it instead of the real
+ * CLI. It impersonates the parts of codex's DERIVE control-plane flow that csd's
+ * launch -> send -> read-turn -> stop path depends on, exercising the REAL
+ * bundled hook (dist/emit-event.cjs) and REAL tmux end to end.
+ *
+ * Unlike claude (assign), codex mints its OWN session id at boot and self-
+ * registers its `<sid>.meta` via the hook. csd therefore writes NO meta at
+ * launch; the only thing it knows is the tmux name. This fake reproduces that:
+ *
+ *   1. Parses `-C <cwd>` from its argv (the launch command's `-C`).
+ *   2. Reads $CODEX_HOME/config.toml — which csd's codex `prepare` wrote — and
+ *      extracts the hook `command` line. THE FIDELITY FIX (PR #21 review): the
+ *      command is run through a REAL shell (`bash -c "$HOOKCMD"`), NOT word-
+ *      split, so the shell-quoted baked args (tmux_name, cwd, worker_dir, each
+ *      single-quoted by shellQuoteAlways) are actually re-parsed by a shell —
+ *      exercising the end-to-end quoting the way codex's own shell exec does.
+ *   3. Prints the "Hooks need review" trust-gate text (fast trust-gate path).
+ *   4. Mints a session id + writes a minimal codex rollout.
+ *   5. Fires a BOOT turn through the hook: SessionStart (the hook self-registers
+ *      `<sid>.meta`, harness codex), UserPromptSubmit, PreToolUse, writes the
+ *      rollout user/assistant lines, then Stop. So read-turn/status have a
+ *      completed turn (the assistant text is FAKE_DONE).
+ *   6. Prints the composer glyph `›` (fast await-ready path).
+ *   7. Drains the trust-gate keystroke csd sends ('2' + Enter).
+ *   8. On each pasted prompt (read from stdin = the tmux pane) fires
+ *      UserPromptSubmit (so csd's send confirmation works) but produces NO new
+ *      completed turn (so converse waits for a real new turn).
+ *   9. On `/quit` (codex's quit keys) emits SessionEnd and exits.
+ *
+ * config the fake cannot learn from argv/cwd is read from the environment:
+ *   CODEX_HOME  the per-worker home (csd sets it as a tmux `-e` pin); the
+ *               config.toml + sessions dir live here.
+ *
+ * The hook learns its worker dir from the BAKED args in the command (the third
+ * positional), NOT from CSD_WORKER_DIR — a fresh tmux session does not inherit
+ * the launcher's env, and the whole point of the codex derive flow is that the
+ * worker dir is baked into the hook command. This is exactly what the fidelity
+ * fix verifies.
+ *
+ * This is an ES module (the repo's package.json sets "type":"module").
+ */
+
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { createInterface } from 'node:readline';
+
+function parseDashC(argv) {
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '-C' && i + 1 < argv.length) return argv[i + 1];
+  }
+  return null;
+}
+
+function requireEnv(name) {
+  const v = process.env[name];
+  if (!v) {
+    process.stderr.write(`fake-codex: missing required env ${name}\n`);
+    process.exit(2);
+  }
+  return v;
+}
+
+const codexHome = requireEnv('CODEX_HOME');
+const cwdArg = parseDashC(process.argv.slice(2)) ?? process.cwd();
+// tmux launches us with `-c <cwd>`; the launch command resolved it to a realpath
+// and baked that into the hook command's cwd arg. Resolve `-C` the same way so
+// the rollout's cwd matches.
+const cwd = realpathSync(cwdArg);
+
+/**
+ * Extract the first hook `command = "..."` value from the codex config.toml and
+ * un-escape the TOML basic-string escapes (\\ and \" — the only ones csd's
+ * tomlBasicString can emit for a path; control chars are not expected here).
+ * The single-quoted baked args inside survive verbatim for `bash -c` to re-parse.
+ */
+function extractHookCommand() {
+  const config = readFileSync(join(codexHome, 'config.toml'), 'utf8');
+  for (const line of config.split('\n')) {
+    const m = line.match(/^command = "(.*)"$/);
+    if (m) {
+      return m[1].replace(/\\(["\\])/g, '$1');
+    }
+  }
+  process.stderr.write('fake-codex: no hook command in config.toml\n');
+  process.exit(2);
+}
+
+const hookCommand = extractHookCommand();
+
+/**
+ * Fire a codex lifecycle event through the REAL bundled hook, the way codex
+ * does: run the shell-quoted hook command via `bash -c` (the fidelity fix) with
+ * the hook payload JSON on stdin. The baked worker-dir arg tells the hook where
+ * to self-register the meta + append events.
+ */
+function fire(hookEventName, extra = {}) {
+  const payload = JSON.stringify({
+    session_id: sid,
+    transcript_path: rollout,
+    cwd,
+    hook_event_name: hookEventName,
+    ...extra,
+  });
+  spawnSync('bash', ['-c', hookCommand], { input: payload, encoding: 'utf8' });
+}
+
+// csd `send` wraps the prompt in bracketed-paste markers (ESC [200~ ... ESC
+// [201~). Reading raw pty bytes over readline, strip them (with the leading ESC).
+const ESC = String.fromCharCode(27);
+const BRACKET_START = `${ESC}[200~`;
+const BRACKET_END = `${ESC}[201~`;
+
+// --- Trust gate (csd's post-launch dismisses this by sending '2' + Enter). ---
+process.stdout.write('Hooks need review (fake-codex)\n');
+
+// --- Mint a session id and lay down a minimal rollout. ---
+const sid = `019efake-0000-7000-8000-${String(process.pid).padStart(12, '0')}`;
+const day = new Date().toISOString().slice(0, 10).split('-').join('/');
+const stamp = new Date()
+  .toISOString()
+  .slice(0, 19)
+  .replace('T', 'T')
+  .replace(/:/g, '-');
+const rollout = join(
+  codexHome,
+  'sessions',
+  day,
+  `rollout-${stamp}-${sid}.jsonl`,
+);
+mkdirSync(dirname(rollout), { recursive: true });
+
+function appendRollout(...objs) {
+  writeFileSync(
+    rollout,
+    `${objs.map((o) => JSON.stringify(o)).join('\n')}\n`,
+    { flag: 'a' },
+  );
+}
+
+appendRollout({ type: 'session_meta', payload: { id: sid, cwd } });
+
+// --- Boot turn: codex emits one before the controller's first prompt. ---
+fire('SessionStart');
+fire('UserPromptSubmit', { prompt: 'boot' });
+fire('PreToolUse', { tool_name: 'Bash' });
+appendRollout(
+  {
+    type: 'response_item',
+    payload: {
+      type: 'message',
+      role: 'user',
+      content: [{ type: 'input_text', text: 'boot' }],
+    },
+  },
+  {
+    type: 'response_item',
+    payload: {
+      type: 'message',
+      role: 'assistant',
+      content: [{ type: 'output_text', text: 'FAKE_DONE' }],
+    },
+  },
+  { type: 'event_msg', payload: { type: 'agent_message', message: 'FAKE_DONE' } },
+);
+fire('Stop');
+
+// --- Composer glyph -> csd's await-ready returns fast. ---
+process.stdout.write('›\n');
+
+// --- React to pasted prompts the way codex would. ---
+const rl = createInterface({ input: process.stdin });
+rl.on('line', (raw) => {
+  const line = raw
+    .split(BRACKET_START)
+    .join('')
+    .split(BRACKET_END)
+    .join('')
+    .trim();
+  // The trust-gate dismissal sends a bare '2'; drain it (and any blank Enters).
+  if (line.length === 0 || line === '2') return;
+  if (line === '/quit') {
+    fire('SessionEnd');
+    rl.close();
+    process.exit(0);
+  }
+  // A pasted user prompt: confirm submission (issue #20) but produce NO new
+  // completed turn — converse must wait for a real new turn, not the boot one.
+  fire('UserPromptSubmit', { prompt: 'next' });
+});
+
+// stdin closing (pane gone) ends the worker.
+rl.on('close', () => process.exit(0));
+
+// Keep the event loop alive even if stdin yields no data.
+setInterval(() => {}, 1 << 30);

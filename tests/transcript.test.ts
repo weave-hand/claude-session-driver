@@ -63,6 +63,21 @@ describe('parseCodexTurn / renderTurn', () => {
     expect(md).not.toContain('·');
   });
 
+  it('renders a codex custom_tool_call (apply_patch) and its output (BUG-1)', () => {
+    // Verbatim shapes captured from a real codex 0.133 apply_patch turn.
+    const call =
+      '{"type":"response_item","payload":{"type":"custom_tool_call","status":"completed","call_id":"c1","name":"apply_patch","input":"*** Begin Patch\\n*** Update File: notes.txt\\n@@\\n-line two\\n+line two EDITED\\n*** End Patch\\n"}}';
+    const output =
+      '{"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"c1","output":"Exit code: 0\\nWall time: 0 seconds\\nOutput:\\nSuccess. Updated the following files:\\nM notes.txt\\n"}}';
+    const md = renderTurn(parseCodexTurn([userLine, call, output].join('\n')), {
+      full: true,
+    });
+    // The patch (call) and its result are both present — not silently dropped.
+    expect(md).toContain('**Tool: apply_patch**');
+    expect(md).toContain('line two EDITED');
+    expect(md).toContain('Updated the following files');
+  });
+
   it('passes a non-codex result through unchanged (no exec header)', () => {
     const md = renderTurn(
       parseCodexTurn([userLine, fcOutput('plain output\nsecond')].join('\n')),

@@ -176,6 +176,7 @@ interface RolloutPayload {
   summary?: unknown;
   name?: unknown;
   arguments?: unknown;
+  input?: unknown;
   output?: unknown;
 }
 
@@ -267,7 +268,9 @@ function collapseCodexResult(text: string): string {
   const idx = text.indexOf(marker);
   if (idx === -1) return text;
   const header = text.slice(0, idx);
-  const exit = header.match(/Process exited with code (\S+)/);
+  // function_call_output headers say "Process exited with code N"; custom tools
+  // (apply_patch) say "Exit code: N". Accept either.
+  const exit = header.match(/(?:Process exited with code|Exit code:) (\S+)/);
   if (!exit) return text;
   const wall = header.match(/Wall time:\s*(\S+)\s*seconds/);
   const status = wall ? `exited ${exit[1]} · ${wall[1]}s` : `exited ${exit[1]}`;
@@ -289,10 +292,18 @@ export function parseCodexTurn(jsonl: string): NormalizedTurn {
       else turn.push({ kind: 'text', text });
     } else if (p.type === 'reasoning') {
       turn.push({ kind: 'thinking', text: reasoningText(p.summary) });
-    } else if (p.type === 'function_call') {
+    } else if (p.type === 'function_call' || p.type === 'custom_tool_call') {
+      // Codex shell tools arrive as function_call (args in `arguments`); native
+      // tools like apply_patch arrive as custom_tool_call (args in `input`).
+      // Both render as a tool_use — otherwise apply_patch edits vanish from
+      // read-turn (BUG-1).
       const name = canonicalCodexTool(typeof p.name === 'string' ? p.name : '');
-      turn.push({ kind: 'tool_use', name, input: p.arguments });
-    } else if (p.type === 'function_call_output') {
+      const input = p.type === 'custom_tool_call' ? p.input : p.arguments;
+      turn.push({ kind: 'tool_use', name, input });
+    } else if (
+      p.type === 'function_call_output' ||
+      p.type === 'custom_tool_call_output'
+    ) {
       turn.push({
         kind: 'tool_result',
         content: collapseCodexResult(resultContent(p.output)),

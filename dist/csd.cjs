@@ -314,7 +314,7 @@ function collapseCodexResult(text) {
   const idx = text.indexOf(marker);
   if (idx === -1) return text;
   const header = text.slice(0, idx);
-  const exit = header.match(/Process exited with code (\S+)/);
+  const exit = header.match(/(?:Process exited with code|Exit code:) (\S+)/);
   if (!exit) return text;
   const wall = header.match(/Wall time:\s*(\S+)\s*seconds/);
   const status = wall ? `exited ${exit[1]} \xB7 ${wall[1]}s` : `exited ${exit[1]}`;
@@ -335,10 +335,11 @@ function parseCodexTurn(jsonl) {
       else turn.push({ kind: "text", text });
     } else if (p.type === "reasoning") {
       turn.push({ kind: "thinking", text: reasoningText(p.summary) });
-    } else if (p.type === "function_call") {
+    } else if (p.type === "function_call" || p.type === "custom_tool_call") {
       const name = canonicalCodexTool(typeof p.name === "string" ? p.name : "");
-      turn.push({ kind: "tool_use", name, input: p.arguments });
-    } else if (p.type === "function_call_output") {
+      const input = p.type === "custom_tool_call" ? p.input : p.arguments;
+      turn.push({ kind: "tool_use", name, input });
+    } else if (p.type === "function_call_output" || p.type === "custom_tool_call_output") {
       turn.push({
         kind: "tool_result",
         content: collapseCodexResult(resultContent(p.output)),

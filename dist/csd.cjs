@@ -1120,6 +1120,13 @@ async function cmdAdopt(ctx, args, opts) {
       code: 1
     };
   }
+  const transcript = driver.transcriptPath(sessionId, cwd, ctx.home);
+  if (!(0, import_node_fs8.existsSync)(transcript)) {
+    return {
+      stderr: `Error: no transcript found for session '${sessionId}' under ${cwd} (expected ${transcript}); it cannot be adopted \u2014 check the session id and cwd.`,
+      code: 1
+    };
+  }
   (0, import_node_fs8.mkdirSync)(ctx.workerDir, { recursive: true });
   (0, import_node_fs8.mkdirSync)((0, import_node_path6.join)(ctx.workerDir, "bin"), { recursive: true });
   ensureBackCompatSymlink(ctx.workerDir);

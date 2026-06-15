@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { hasConsent } from '../core/consent.js';
 import { ensureBackCompatSymlink, eventsPath } from '../core/paths.js';
@@ -73,6 +73,17 @@ export async function cmdAdopt(
   if (existingHarness !== null && existingHarness !== 'claude') {
     return {
       stderr: `Error: '${tmuxName}' is a ${existingHarness} worker; adopt is claude-only (codex/pi mint their own ids and offer no resume-by-id). Stop it first, then relaunch.`,
+      code: 1,
+    };
+  }
+
+  // A bad/typo'd session id otherwise burns the full 30s session_start wait, then
+  // returns a generic "failed to start". The transcript must exist to resume it,
+  // so fail fast and name the id (N-1).
+  const transcript = driver.transcriptPath(sessionId, cwd, ctx.home);
+  if (!existsSync(transcript)) {
+    return {
+      stderr: `Error: no transcript found for session '${sessionId}' under ${cwd} (expected ${transcript}); it cannot be adopted — check the session id and cwd.`,
       code: 1,
     };
   }

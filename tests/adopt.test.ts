@@ -1,6 +1,13 @@
-import { mkdtempSync, realpathSync, rmSync, statSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { cmdAdopt } from '../src/commands/adopt.js';
 import type { CommandContext } from '../src/commands/context.js';
@@ -94,6 +101,27 @@ describe('cmdAdopt', () => {
     csdPath: '/usr/local/bin/csd',
   });
 
+  /** Create the Claude transcript adopt's pre-flight requires (N-1). */
+  function seedTranscript(sid = SID): void {
+    const t = getDriver('claude').transcriptPath(sid, cwd, home);
+    mkdirSync(dirname(t), { recursive: true });
+    writeFileSync(t, '{"type":"user","message":{"content":"hi"}}\n');
+  }
+
+  it('fails fast with a clear error when the session transcript does not exist (N-1)', async () => {
+    grantConsent(home);
+    const ctx = makeCtx(workerDir, home, fakeTmux(freshState()));
+    const result = await cmdAdopt(
+      ctx,
+      { tmuxName: 'w1', cwd, sessionId: SID, extraArgs: [] },
+      { ...baseOpts(), ...FAST },
+    );
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain(`no transcript found for session '${SID}'`);
+    // Failed before touching tmux or writing any worker state.
+    expect(readMeta(workerDir, SID)).toBeNull();
+  });
+
   it('errors when cwd does not exist', async () => {
     grantConsent(home);
     const ctx = makeCtx(workerDir, home, fakeTmux(freshState()));
@@ -159,6 +187,7 @@ describe('cmdAdopt', () => {
 
   it('adopts with NO existing session: opens a new pane with --resume', async () => {
     grantConsent(home);
+    seedTranscript();
     const state = freshState();
     // The meta must already exist when the pane is created (the SessionStart
     // hook needs it to record events), so assert it from the launch callback.
@@ -214,6 +243,7 @@ describe('cmdAdopt', () => {
 
   it('adopts WITH an existing session: respawns the pane in place', async () => {
     grantConsent(home);
+    seedTranscript();
     const state = freshState();
     state.hasSession = true;
     const ctx = makeCtx(
@@ -249,6 +279,7 @@ describe('cmdAdopt', () => {
 
   it('pre-writes the meta before launch and tears it down on proof-of-life failure', async () => {
     grantConsent(home);
+    seedTranscript();
     const state = freshState();
     // The worker never emits session_start, so the wait times out.
     const ctx = makeCtx(workerDir, home, fakeTmux(state));

@@ -1111,6 +1111,13 @@ async function cmdAdopt(ctx, args, opts) {
     };
   }
   if (!hasConsent(ctx.home)) return consentError(opts.csdPath);
+  const existingHarness = readHarnessMarker(ctx.workerDir, tmuxName);
+  if (existingHarness !== null && existingHarness !== "claude") {
+    return {
+      stderr: `Error: '${tmuxName}' is a ${existingHarness} worker; adopt is claude-only (codex/pi mint their own ids and offer no resume-by-id). Stop it first, then relaunch.`,
+      code: 1
+    };
+  }
   (0, import_node_fs8.mkdirSync)(ctx.workerDir, { recursive: true });
   (0, import_node_fs8.mkdirSync)((0, import_node_path6.join)(ctx.workerDir, "bin"), { recursive: true });
   ensureBackCompatSymlink(ctx.workerDir);

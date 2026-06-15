@@ -3,7 +3,11 @@ import { join } from 'node:path';
 import { hasConsent } from '../core/consent.js';
 import { ensureBackCompatSymlink, eventsPath } from '../core/paths.js';
 import { isoSecondsUtc } from '../core/time.js';
-import { writeMeta, writeShim } from '../core/worker-store.js';
+import {
+  readHarnessMarker,
+  writeMeta,
+  writeShim,
+} from '../core/worker-store.js';
 import { getDriver } from '../harness/registry.js';
 import { awaitSessionStart } from './await-start.js';
 import type { CommandContext, CommandResult } from './context.js';
@@ -60,6 +64,18 @@ export async function cmdAdopt(
   }
 
   if (!hasConsent(ctx.home)) return consentError(opts.csdPath);
+
+  // adopt is claude-only. A codex/pi worker of this tmux-name leaves a `.harness`
+  // sidecar; refuse rather than respawn its pane as `claude --resume <id>`, which
+  // would rewrite its meta and destroy it. Claude workers leave no sidecar, so
+  // re-adopting one is unaffected.
+  const existingHarness = readHarnessMarker(ctx.workerDir, tmuxName);
+  if (existingHarness !== null && existingHarness !== 'claude') {
+    return {
+      stderr: `Error: '${tmuxName}' is a ${existingHarness} worker; adopt is claude-only (codex/pi mint their own ids and offer no resume-by-id). Stop it first, then relaunch.`,
+      code: 1,
+    };
+  }
 
   mkdirSync(ctx.workerDir, { recursive: true });
   mkdirSync(join(ctx.workerDir, 'bin'), { recursive: true });

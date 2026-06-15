@@ -8,7 +8,11 @@ import { grantConsent } from '../src/core/consent.js';
 import { appendEvent } from '../src/core/event-log.js';
 import { eventsPath, shimPath } from '../src/core/paths.js';
 import type { Tmux } from '../src/core/tmux.js';
-import { readMeta } from '../src/core/worker-store.js';
+import {
+  readHarnessMarker,
+  readMeta,
+  writeHarnessMarker,
+} from '../src/core/worker-store.js';
 import { getDriver } from '../src/harness/registry.js';
 
 function tmpDir(prefix: string): string {
@@ -125,6 +129,32 @@ describe('cmdAdopt', () => {
     );
     expect(result.code).toBe(1);
     expect(result.stderr).toContain('requires one-time consent');
+  });
+
+  it('refuses to adopt over a non-claude worker, leaving it intact (BUG-2)', async () => {
+    grantConsent(home);
+    // A codex worker owns this tmux name (its .harness sidecar records the
+    // harness) and its pane is live.
+    writeHarnessMarker(workerDir, 'codex-worker', 'codex');
+    const state: FakeTmuxState = {
+      hasSession: true,
+      newSession: [],
+      respawnPane: [],
+    };
+    const ctx = makeCtx(workerDir, home, fakeTmux(state));
+    const result = await cmdAdopt(
+      ctx,
+      { tmuxName: 'codex-worker', cwd, sessionId: SID, extraArgs: [] },
+      { ...baseOpts(), ...FAST },
+    );
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('codex');
+    // The worker is NOT clobbered: no pane respawn/new-session, sidecar intact,
+    // and adopt did not overwrite its identity with a claude meta.
+    expect(state.respawnPane).toHaveLength(0);
+    expect(state.newSession).toHaveLength(0);
+    expect(readHarnessMarker(workerDir, 'codex-worker')).toBe('codex');
+    expect(readMeta(workerDir, SID)).toBeNull();
   });
 
   it('adopts with NO existing session: opens a new pane with --resume', async () => {

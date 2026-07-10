@@ -20,6 +20,7 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // src/cli.ts
 var cli_exports = {};
 __export(cli_exports, {
+  envTimeoutMs: () => envTimeoutMs,
   followStream: () => followStream,
   grantConsentConfirm: () => grantConsentConfirm,
   readLine: () => readLine,
@@ -921,7 +922,9 @@ async function awaitSessionStart(ctx, tmuxName, sessionId, opts = {}) {
     tail = paneTail(await ctx.tmux.capturePane(tmuxName), 20);
   } catch {
   }
-  const lines = ["Error: Worker session failed to start within 30 seconds"];
+  const lines = [
+    `Error: Worker session failed to start within ${startTimeoutMs / 1e3} seconds`
+  ];
   if (tail.length > 0) {
     lines.push(
       "",
@@ -2028,6 +2031,12 @@ Environment variables:
                        (default 2).
   CSD_REGISTER_TIMEOUT Seconds the FIRST \`send\` to a derive worker (codex/pi) waits
                        for it to self-register its session id (default 15).
+  CSD_START_TIMEOUT_MS / CSD_TRUST_TIMEOUT_MS
+                       \`launch\`/\`adopt\` (claude): ms to wait for the worker's
+                       session_start proof-of-life (default 30000) and for a trust
+                       dialog before that (default 5000). Raise CSD_START_TIMEOUT_MS
+                       when the worker binary is a slow-starting wrapper (e.g. a
+                       container that clones + warms a toolchain before claude runs).
   HOME                 Used to locate ~/.claude/projects/<encoded-cwd>/<sid>.jsonl and
                        the one-time consent file (~/.claude/.claude-session-driver-consent).
 `;
@@ -2072,12 +2081,20 @@ function buildContext(worker) {
     driver: getDriver(harness)
   };
 }
+function envTimeoutMs(name, env = process.env) {
+  const raw = env[name];
+  if (raw === void 0 || raw === "") return void 0;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : void 0;
+}
 function bootstrapOpts() {
   const csdEntry = (0, import_node_path8.join)(__dirname, "csd.cjs");
   return {
     pluginDir: process.env.CLAUDE_PLUGIN_ROOT ?? (0, import_node_path8.resolve)(__dirname, ".."),
     csdEntry,
-    csdPath: process.env.CSD_PATH ?? csdEntry
+    csdPath: process.env.CSD_PATH ?? csdEntry,
+    startTimeoutMs: envTimeoutMs("CSD_START_TIMEOUT_MS"),
+    trustTimeoutMs: envTimeoutMs("CSD_TRUST_TIMEOUT_MS")
   };
 }
 function readLine(input = process.stdin) {
@@ -2411,6 +2428,7 @@ if (typeof require !== "undefined" && typeof module !== "undefined" && require.m
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  envTimeoutMs,
   followStream,
   grantConsentConfirm,
   readLine,

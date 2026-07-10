@@ -290,7 +290,7 @@ describe('cmdAdopt', () => {
     );
     expect(result.code).toBe(1);
     expect(result.stderr).toContain(
-      'Error: Worker session failed to start within 30 seconds',
+      'Error: Worker session failed to start within 0.04 seconds',
     );
     // Teardown removed the pre-written meta.
     expect(readMeta(workerDir, SID)).toBeNull();

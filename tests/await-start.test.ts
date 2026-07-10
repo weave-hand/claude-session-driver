@@ -151,8 +151,10 @@ describe('awaitSessionStart', () => {
     });
     expect(result.started).toBe(false);
     if (result.started) throw new Error('expected timeout failure');
+    // The message reflects the ACTUAL window (here 60ms), not a hardcoded 30s —
+    // it must stay truthful when CSD_START_TIMEOUT_MS raises the window.
     expect(result.failureMessage).toContain(
-      'Error: Worker session failed to start within 30 seconds',
+      'Error: Worker session failed to start within 0.06 seconds',
     );
     // Pane tail included in the failure message.
     expect(result.failureMessage).toContain('last visible line');

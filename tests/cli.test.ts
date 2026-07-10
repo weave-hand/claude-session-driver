@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  envTimeoutMs,
   followStream,
   grantConsentConfirm,
   readLine,
@@ -450,5 +451,24 @@ describe('followStream — the --follow streaming sink', () => {
     for (const chunk of out) {
       expect(chunk.endsWith('\n')).toBe(true);
     }
+  });
+});
+
+describe('envTimeoutMs', () => {
+  it('parses a positive integer', () => {
+    expect(
+      envTimeoutMs('CSD_START_TIMEOUT_MS', { CSD_START_TIMEOUT_MS: '900000' }),
+    ).toBe(900000);
+  });
+
+  it.each([
+    ['unset', {}],
+    ['empty', { CSD_START_TIMEOUT_MS: '' }],
+    ['non-numeric', { CSD_START_TIMEOUT_MS: 'soon' }],
+    ['zero', { CSD_START_TIMEOUT_MS: '0' }],
+    ['negative', { CSD_START_TIMEOUT_MS: '-5' }],
+    ['fractional', { CSD_START_TIMEOUT_MS: '1.5' }],
+  ])('returns undefined for %s (built-in default applies, never a 0ms window)', (_label, env) => {
+    expect(envTimeoutMs('CSD_START_TIMEOUT_MS', env)).toBeUndefined();
   });
 });

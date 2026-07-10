@@ -98,7 +98,9 @@ export async function awaitSessionStart(
   } catch {
     // pane capture is best-effort; an empty tail is fine.
   }
-  const lines = ['Error: Worker session failed to start within 30 seconds'];
+  const lines = [
+    `Error: Worker session failed to start within ${startTimeoutMs / 1000} seconds`,
+  ];
   if (tail.length > 0) {
     lines.push(
       '',
